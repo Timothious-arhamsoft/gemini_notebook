@@ -1,0 +1,23 @@
+# Web framework
+fastapi
+uvicorn[standard]
+
+# Configuration & environment variables
+pydantic-settings
+python-dotenv
+
+# File uploads
+python-multipart
+
+# Database
+sqlalchemy
+alembic
+psycopg2-binary
+
+# HTTP client
+httpx
+
+# Testing
+pytest
+pytest-asyncio
+
