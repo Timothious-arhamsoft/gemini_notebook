@@ -26,3 +26,6 @@ httpx
 pytest
 pytest-asyncio
 
+# JWT and security
+python-jose[cryptography]
+
