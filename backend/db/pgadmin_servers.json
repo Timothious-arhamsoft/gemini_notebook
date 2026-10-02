@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Gemini Notebook (Docker)",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "gemini_notebook",
+      "Username": "postgres",
+      "SSLMode": "prefer",
+      "PassFile": "/pgpass"
+    }
+  }
+}
