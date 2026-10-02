@@ -1,7 +1,15 @@
+import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+)
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -9,12 +17,97 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
 
+
 router = APIRouter()
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_ctx = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+)
+
+security = HTTPBearer()
+
+SECRET_KEY = os.getenv(
+    "SECRET_KEY",
+    "change-this-secret-key",
+)
+
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 
-# ─── Schemas ───────────────────────────────────────────────
+# ─── JWT Helpers ────────────────────────────────────────────
+
+def create_access_token(user_id: uuid.UUID) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(
+        minutes=ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+
+    payload = {
+        "sub": str(user_id),
+        "exp": expire,
+    }
+
+    return jwt.encode(
+        payload,
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+) -> User:
+
+    token = credentials.credentials
+
+    try:
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+        )
+
+        user_id = payload.get("sub")
+
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication token",
+            )
+
+        user_uuid = uuid.UUID(user_id)
+
+    except (JWTError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+        )
+
+    user = (
+        db.query(User)
+        .filter(User.id == user_uuid)
+        .first()
+    )
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
+
+    return user
+
+
+# ─── Schemas ────────────────────────────────────────────────
+
 class UserRegister(BaseModel):
     email: EmailStr
     username: str
@@ -46,11 +139,29 @@ class TokenResponse(BaseModel):
 
 
 # ─── Routes ────────────────────────────────────────────────
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: UserRegister, db: Session = Depends(get_db)):
-    """Register a new user. Passwords are bcrypt-hashed."""
-    if db.query(User).filter(User.email == payload.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered")
+
+@router.post(
+    "/register",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register(
+    payload: UserRegister,
+    db: Session = Depends(get_db),
+):
+    """Register a new user."""
+
+    existing_user = (
+        db.query(User)
+        .filter(User.email == payload.email)
+        .first()
+    )
+
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered",
+        )
 
     user = User(
         email=payload.email,
@@ -58,26 +169,66 @@ def register(payload: UserRegister, db: Session = Depends(get_db)):
         full_name=payload.full_name,
         hashed_password=pwd_ctx.hash(payload.password),
     )
+
     db.add(user)
     db.commit()
     db.refresh(user)
+
     return user
 
 
-@router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    """Placeholder login — returns a stub token. Wire JWT later."""
-    user = db.query(User).filter(User.email == payload.email).first()
+@router.post(
+    "/login",
+    response_model=TokenResponse,
+)
+def login(
+    payload: LoginRequest,
+    db: Session = Depends(get_db),
+):
+    """Authenticate user and return a JWT."""
+
+    user = (
+        db.query(User)
+        .filter(User.email == payload.email)
+        .first()
+    )
+
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    # TODO: verify password + issue real JWT
-    return {"access_token": f"stub-token-for-{user.id}", "token_type": "bearer"}
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    if not pwd_ctx.verify(
+        payload.password,
+        user.hashed_password,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password",
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
+
+    access_token = create_access_token(user.id)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
 
 
-@router.get("/me", response_model=UserResponse)
-def me(db: Session = Depends(get_db)):
-    """Placeholder — returns the demo user. Replace with JWT auth dep."""
-    user = db.query(User).filter(User.email == "demo@gemini.local").first()
-    if not user:
-        raise HTTPException(status_code=404, detail="Demo user not found")
-    return user
+@router.get(
+    "/me",
+    response_model=UserResponse,
+)
+def me(
+    current_user: User = Depends(get_current_user),
+):
+    """Return the currently authenticated user."""
+
+    return current_user
