@@ -8,8 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Notebook, User
 from app.routers.auth import get_current_user
-from app.models import Notebook, User
-from app.routers.auth import get_current_user
+
 
 router = APIRouter()
 
@@ -17,6 +16,11 @@ router = APIRouter()
 # ── Schemas ────────────────────────────────────────────────────
 class NotebookCreate(BaseModel):
     title: str = "Untitled Notebook"
+    description: str | None = None
+
+
+class NotebookUpdate(BaseModel):
+    title: str | None = None
     description: str | None = None
 
 
@@ -93,6 +97,39 @@ def get_notebook(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Notebook not found",
         )
+
+    return nb
+
+
+@router.patch("/{notebook_id}", response_model=NotebookResponse)
+def update_notebook(
+    notebook_id: uuid.UUID,
+    payload: NotebookUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Partially update a notebook's title and/or description."""
+    nb = (
+        db.query(Notebook)
+        .filter(
+            Notebook.id == notebook_id,
+            Notebook.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if not nb:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Notebook not found",
+        )
+
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(nb, field, value)
+
+    db.commit()
+    db.refresh(nb)
 
     return nb
 
