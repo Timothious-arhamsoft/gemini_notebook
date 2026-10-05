@@ -31,7 +31,7 @@ export function LoginForm({ onSwitch }: { onSwitch: () => void }) {
     <form className="auth-form" onSubmit={handleSubmit}>
       <div className="auth-form__header">
         <h1 className="auth-form__title">Welcome back</h1>
-        <p className="auth-form__subtitle">Sign in to your Gemini Notebook</p>
+        <p className="auth-form__subtitle">Sign in to your NoteGenio Notebook</p>
       </div>
 
       {error && <div className="auth-form__error">{error}</div>}

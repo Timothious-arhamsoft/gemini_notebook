@@ -20,7 +20,7 @@ export function Auth() {
             <path d="M8 8h8a6 6 0 0 1 0 12H8V8Z" fill="white" opacity="0.9"/>
             <circle cx="19" cy="20" r="2.5" fill="white" opacity="0.6"/>
           </svg>
-          <span className="auth-page__logo-text">Gemini Notebook</span>
+          <span className="auth-page__logo-text">NoteGenio</span>
         </div>
 
         <div className="auth-page__form-wrapper">

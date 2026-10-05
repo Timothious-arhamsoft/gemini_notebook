@@ -10,14 +10,14 @@ from app.routers import auth, health, notebooks
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("🚀  Gemini Notebook API starting...")
+    print("🚀  NoteGenio API starting...")
     yield
     # Shutdown
     print("👋  Shutting down")
 
 
 app = FastAPI(
-    title="Gemini Notebook API",
+    title="NoteGenio API",
     description="NotebookLM-inspired RAG backend powered by FastAPI + Gemini",
     version="0.1.0",
     lifespan=lifespan,

@@ -35,7 +35,7 @@ export function NotebookPage() {
     notebooksApi.get(id)
       .then(data => {
         setNotebook(data)
-        document.title = `${data.title} - Gemini Notebook`
+        document.title = `${data.title} - NoteGenio Notebook`
       })
       .catch(err => {
         console.error('Failed to load notebook:', err)
@@ -47,7 +47,7 @@ export function NotebookPage() {
   // 2. Set document title on notebook change
   useEffect(() => {
     if (notebook?.title) {
-      document.title = `${notebook.title} - Gemini Notebook`
+      document.title = `${notebook.title} - NoteGenio Notebook`
     }
   }, [notebook?.title])
 
