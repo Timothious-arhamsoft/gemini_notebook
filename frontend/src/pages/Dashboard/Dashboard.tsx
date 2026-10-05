@@ -1,17 +1,18 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { notebooksApi } from '../../api/notebooks'
 import { DashboardHeader } from './components/DashboardHeader/DashboardHeader'
 import { NotebookCard } from './components/NotebookCard/NotebookCard'
-import { CreateNotebookModal } from './components/CreateNotebookModal/CreateNotebookModal'
 import { Spinner } from '../../components/Spinner'
 import { Button } from '../../components/Button'
-import type { Notebook, CreateNotebookPayload } from '../../types'
+import type { Notebook } from '../../types'
 import './Dashboard.css'
 
 export function Dashboard() {
+  const navigate = useNavigate()
   const [notebooks, setNotebooks] = useState<Notebook[]>([])
   const [loading, setLoading] = useState(true)
-  const [showModal, setShowModal] = useState(false)
+  const [creating, setCreating] = useState(false)
 
   const load = async () => {
     try {
@@ -24,9 +25,17 @@ export function Dashboard() {
 
   useEffect(() => { load() }, [])
 
-  const handleCreate = async (payload: CreateNotebookPayload) => {
-    const nb = await notebooksApi.create(payload)
-    setNotebooks(prev => [nb, ...prev])
+  /** Create an Untitled notebook and navigate straight into it */
+  const handleNewNotebook = async () => {
+    if (creating) return
+    setCreating(true)
+    try {
+      const nb = await notebooksApi.create({ title: 'Untitled', description: '0 sources' })
+      navigate(`/notebook/${nb.id}`)
+    } catch (err) {
+      console.error('Failed to create notebook:', err)
+      setCreating(false)
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -37,7 +46,7 @@ export function Dashboard() {
 
   return (
     <div className="dashboard">
-      <DashboardHeader onNewNotebook={() => setShowModal(true)} />
+      <DashboardHeader onNewNotebook={handleNewNotebook} />
 
       <main className="dashboard__main">
         <div className="dashboard__section-header">
@@ -59,8 +68,12 @@ export function Dashboard() {
             </div>
             <p className="dashboard__empty-title">No notebooks yet</p>
             <p className="dashboard__empty-sub">Create your first notebook to start chatting with your documents</p>
-            <Button variant="primary" onClick={() => setShowModal(true)}
-              icon={<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5Z"/></svg>}>
+            <Button
+              variant="primary"
+              onClick={handleNewNotebook}
+              loading={creating}
+              icon={<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a.5.5 0 0 1 .5.5v5.5H14a.5.5 0 0 1 0 1H8.5V14a.5.5 0 0 1-1 0V8.5H2a.5.5 0 0 1 0-1h5.5V2a.5.5 0 0 1 .5-.5Z"/></svg>}
+            >
               New notebook
             </Button>
           </div>
@@ -69,21 +82,25 @@ export function Dashboard() {
             {notebooks.map(nb => (
               <NotebookCard key={nb.id} notebook={nb} onDelete={handleDelete} />
             ))}
-            <button className="notebook-card notebook-card--new" onClick={() => setShowModal(true)}>
+            <button
+              className="notebook-card notebook-card--new"
+              onClick={handleNewNotebook}
+              disabled={creating}
+            >
               <div className="notebook-card__new-icon">
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M10 3.5a.5.5 0 0 1 .5.5v5.5H16a.5.5 0 0 1 0 1h-5.5V16a.5.5 0 0 1-1 0v-5.5H4a.5.5 0 0 1 0-1h5.5V4a.5.5 0 0 1 .5-.5Z"/>
-                </svg>
+                {creating ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M10 3.5a.5.5 0 0 1 .5.5v5.5H16a.5.5 0 0 1 0 1h-5.5V16a.5.5 0 0 1-1 0v-5.5H4a.5.5 0 0 1 0-1h5.5V4a.5.5 0 0 1 .5-.5Z"/>
+                  </svg>
+                )}
               </div>
-              <span>New notebook</span>
+              <span>{creating ? 'Creating…' : 'New notebook'}</span>
             </button>
           </div>
         )}
       </main>
-
-      {showModal && (
-        <CreateNotebookModal onConfirm={handleCreate} onClose={() => setShowModal(false)} />
-      )}
     </div>
   )
 }

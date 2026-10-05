@@ -10,6 +10,13 @@ import { Spinner } from '../../components/Spinner'
 import type { ChatMessage as ChatMessageType, Notebook, UploadFile } from '../../types'
 import './Notebook.css'
 
+const UNTITLED = 'Untitled'
+
+/** Derive singular/plural source count label */
+function sourceCountLabel(n: number) {
+  return n === 1 ? '1 source' : `${n} sources`
+}
+
 export function NotebookPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -23,6 +30,9 @@ export function NotebookPage() {
   const [hasAutoOpenedModal, setHasAutoOpenedModal] = useState(false)
   const [selectedViewFile, setSelectedViewFile] = useState<UploadFile | null>(null)
 
+  // Track whether the user has manually set the title
+  const userHasRenamedRef = useRef(false)
+
   const [messages, setMessages] = useState<ChatMessageType[]>([])
   const [sending, setSending] = useState(false)
 
@@ -35,7 +45,11 @@ export function NotebookPage() {
     notebooksApi.get(id)
       .then(data => {
         setNotebook(data)
-        document.title = `${data.title} - NoteGenio Notebook`
+        // If notebook was saved with a real name before, mark as user-renamed
+        if (data.title && data.title !== UNTITLED) {
+          userHasRenamedRef.current = true
+        }
+        document.title = `${data.title} - NoteGenio`
       })
       .catch(err => {
         console.error('Failed to load notebook:', err)
@@ -44,14 +58,14 @@ export function NotebookPage() {
       .finally(() => setLoading(false))
   }, [id])
 
-  // 2. Set document title on notebook change
+  // 2. Sync document.title when notebook title changes
   useEffect(() => {
     if (notebook?.title) {
-      document.title = `${notebook.title} - NoteGenio Notebook`
+      document.title = `${notebook.title} - NoteGenio`
     }
   }, [notebook?.title])
 
-  // 3. Automatically pop up Upload Modal IF no documents added on open
+  // 3. Auto-open Upload Modal when no sources on first open
   useEffect(() => {
     if (!loading && notebook && uploads.length === 0 && !hasAutoOpenedModal) {
       setShowUploadModal(true)
@@ -59,7 +73,17 @@ export function NotebookPage() {
     }
   }, [loading, notebook, uploads.length, hasAutoOpenedModal])
 
-  // Scroll to bottom when new messages arrive
+  // 4. Auto-update description to match source count
+  useEffect(() => {
+    if (!notebook || !id) return
+    const label = sourceCountLabel(uploads.length)
+    if (notebook.description === label) return
+    setNotebook(prev => prev ? { ...prev, description: label } : prev)
+    // Persist description update in background (best-effort)
+    notebooksApi.update(id, { description: label }).catch(() => {})
+  }, [uploads.length, id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Scroll to bottom on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
@@ -73,9 +97,27 @@ export function NotebookPage() {
       progress: 25,
     }))
 
-    setUploads(prev => [...prev, ...newItems])
+    setUploads(prev => {
+      const combined = [...prev, ...newItems]
 
-    // Simulate progress -> processing -> ready
+      // Auto-title: if this is the FIRST upload ever AND user hasn't manually renamed
+      if (prev.length === 0 && !userHasRenamedRef.current && newItems.length > 0) {
+        const firstFileName = newItems[0].file.name.replace(/\.[^/.]+$/, '') // strip extension
+        const newTitle = firstFileName || UNTITLED
+        setNotebook(nb => {
+          if (!nb) return nb
+          document.title = `${newTitle} - NoteGenio`
+          // Persist in background
+          if (id) notebooksApi.update(id, { title: newTitle }).catch(() => {})
+          return { ...nb, title: newTitle }
+        })
+        userHasRenamedRef.current = true
+      }
+
+      return combined
+    })
+
+    // Simulate progress → processing → ready
     newItems.forEach(item => {
       setTimeout(() => {
         setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 75, status: 'processing' } : u))
@@ -85,7 +127,7 @@ export function NotebookPage() {
         setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 100, status: 'ready' } : u))
       }, 1500)
     })
-  }, [])
+  }, [id])
 
   const handleRemoveFile = useCallback((fileId: string) => {
     setUploads(prev => prev.filter(u => u.id !== fileId))
@@ -94,9 +136,22 @@ export function NotebookPage() {
     }
   }, [selectedViewFile?.id])
 
+  /** Called when user edits the title inline in WorkspaceHeader */
   const handleTitleChange = (newTitle: string) => {
-    if (!notebook) return
+    if (!notebook || !id) return
+    userHasRenamedRef.current = true
     setNotebook({ ...notebook, title: newTitle })
+    document.title = `${newTitle} - NoteGenio`
+  }
+
+  /** Persist title when user finishes editing (blur event) */
+  const handleTitleBlur = (finalTitle: string) => {
+    if (!id) return
+    const trimmed = finalTitle.trim() || UNTITLED
+    if (trimmed !== notebook?.title) {
+      setNotebook(prev => prev ? { ...prev, title: trimmed } : prev)
+    }
+    notebooksApi.update(id, { title: trimmed }).catch(() => {})
   }
 
   // Handle sending chat message
@@ -118,7 +173,7 @@ export function NotebookPage() {
     setTimeout(() => {
       const readySources = uploads.filter(u => u.status === 'ready')
       let aiContent = `Based on your uploaded sources, here is what I found regarding "${text}":\n\n`
-      
+
       if (readySources.length > 0) {
         aiContent += `Key insights extracted from **${readySources[0].file.name}**:\n` +
           `• The documents emphasize core principles and structured execution.\n` +
@@ -179,7 +234,9 @@ export function NotebookPage() {
       {/* 1. Header */}
       <WorkspaceHeader
         title={notebook.title}
+        description={notebook.description ?? sourceCountLabel(uploads.length)}
         onTitleChange={handleTitleChange}
+        onTitleBlur={handleTitleBlur}
       />
 
       {/* 2. Main Workspace Layout */}
@@ -204,11 +261,11 @@ export function NotebookPage() {
                     <rect width="28" height="28" rx="8" fill="var(--accent)" />
                     <path d="M8 8h8a6 6 0 0 1 0 12H8V8Z" fill="white" opacity="0.9"/>
                   </svg>
-                  <span>Gemini RAG Assistant</span>
+                  <span>NoteGenio Assistant</span>
                 </div>
                 <h2>Chat with your sources</h2>
                 <p>
-                  Ask questions, summarize documents, or extract key information. 
+                  Ask questions, summarize documents, or extract key information.
                   Answers are grounded in your uploaded source files.
                 </p>
 
@@ -253,7 +310,7 @@ export function NotebookPage() {
         </main>
       </div>
 
-      {/* 3. Upload Modal Pop-Up (Appears when clicking Add Source or automatically if empty) */}
+      {/* 3. Upload Modal Pop-Up */}
       {showUploadModal && (
         <UploadModal
           uploads={uploads}

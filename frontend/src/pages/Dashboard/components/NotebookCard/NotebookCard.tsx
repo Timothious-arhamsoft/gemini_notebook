@@ -22,9 +22,11 @@ export function NotebookCard({ notebook, onDelete }: { notebook: Notebook; onDel
 
       <div className="notebook-card__body">
         <h3 className="notebook-card__title">{notebook.title}</h3>
-        {notebook.description && (
-          <p className="notebook-card__desc">{notebook.description}</p>
-        )}
+        <p className="notebook-card__desc">
+          {notebook.description ?? (notebook.source_count !== undefined
+            ? (notebook.source_count === 1 ? '1 source' : `${notebook.source_count} sources`)
+            : '0 sources')}
+        </p>
         <p className="notebook-card__meta">
           Updated {formatDate(notebook.updated_at)}
         </p>

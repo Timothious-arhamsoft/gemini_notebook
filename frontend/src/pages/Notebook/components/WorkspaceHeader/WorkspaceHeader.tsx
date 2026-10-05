@@ -3,10 +3,12 @@ import { useAuth } from '../../../../contexts/AuthContext'
 
 interface Props {
   title: string
+  description?: string
   onTitleChange: (t: string) => void
+  onTitleBlur?: (t: string) => void
 }
 
-export function WorkspaceHeader({ title, onTitleChange }: Props) {
+export function WorkspaceHeader({ title, description, onTitleChange, onTitleBlur }: Props) {
   const navigate = useNavigate()
   const { logout } = useAuth()
 
@@ -24,13 +26,21 @@ export function WorkspaceHeader({ title, onTitleChange }: Props) {
             <path d="M8 8h8a6 6 0 0 1 0 12H8V8Z" fill="white" opacity="0.9"/>
           </svg>
         </div>
-        <input
-          className="ws-header__title"
-          value={title}
-          onChange={e => onTitleChange(e.target.value)}
-          placeholder="Untitled Notebook"
-          aria-label="Notebook title"
-        />
+        <div className="ws-header__title-group">
+          <input
+            className="ws-header__title"
+            value={title}
+            onChange={e => onTitleChange(e.target.value)}
+            onBlur={e => onTitleBlur?.(e.target.value)}
+            placeholder="Untitled"
+            aria-label="Notebook title"
+          />
+          {description !== undefined && (
+            <span className="ws-header__description" aria-label="Source count">
+              {description}
+            </span>
+          )}
+        </div>
       </div>
       <div className="ws-header__right">
         <button className="ws-header__logout" onClick={() => { logout(); navigate('/auth') }}>

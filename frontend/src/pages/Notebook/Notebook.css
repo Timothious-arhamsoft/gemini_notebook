@@ -23,8 +23,8 @@
 
 /* ── Header ─────────────────────────────────────────────── */
 .ws-header {
-  height: 56px;
-  min-height: 56px;
+  height: 64px;
+  min-height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -110,11 +110,34 @@
   border-color: var(--accent);
 }
 
+/* Title + description group */
+.ws-header__title-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.ws-header__description {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--fg-muted);
+  padding: 0 0.5rem;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  user-select: none;
+}
+
+
 /* ── Workspace Body ─────────────────────────────────────── */
 .notebook-workspace__body {
   display: flex;
   flex: 1;
-  height: calc(100vh - 56px);
+  height: calc(100vh - 64px);
   overflow: hidden;
 }
 
