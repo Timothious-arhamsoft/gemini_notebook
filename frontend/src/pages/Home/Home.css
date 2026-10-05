@@ -1,12 +1,97 @@
-/* ── Layout ─────────────────────────────────────────────── */
-.home {
-  position: relative;
-  min-height: 100vh;
+/* ── Theme Toggle Button ──────────────────────────────── */
+.home__theme-toggle {
   display: flex;
-  flex-direction: column;
-  background: var(--bg-base);
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: var(--radius-full);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
   color: var(--text-primary);
-  overflow-x: hidden;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.home__theme-toggle:hover {
+  background: var(--bg-elevated);
+  transform: scale(1.05);
+}
+
+/* ── Day & Night Theme Overrides ───────────────────────── */
+.home--day {
+  background: radial-gradient(circle at 50% 10%, #f8fafc 0%, #f1f5f9 60%, #e2e8f0 100%);
+  color: #0f172a;
+}
+.home--day::before {
+  background: radial-gradient(ellipse at center, rgba(109, 106, 255, 0.15) 0%, transparent 70%);
+}
+
+.home--day .home__nav {
+  background: rgba(255, 255, 255, 0.85);
+  border-bottom: 1px solid rgba(203, 213, 225, 0.7);
+}
+
+.home--day .home__nav-logo {
+  color: #0f172a;
+}
+
+.home--day .home__nav-btn {
+  color: #475569;
+}
+.home--day .home__nav-btn:hover {
+  color: #0f172a;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.home--day h1,
+.home--day .home__hero h1 {
+  color: #0f172a !important;
+}
+
+.home--day p,
+.home--day .home__hero p {
+  color: #334155 !important;
+}
+
+
+.home--day .home__secondary {
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+.home--day .home__secondary:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.home--day .home__slide-art {
+  background: #ffffff;
+  border: 1px solid rgba(203, 213, 225, 0.8);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.08);
+}
+
+.home--day .home__slide-title {
+  color: #0f172a;
+}
+
+.home--day .home__slide-desc {
+  color: #475569;
+}
+
+.home--day .home__art-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 16px 36px -12px rgba(0, 0, 0, 0.1);
+}
+
+.home--day .home__bar {
+  background: #e2e8f0;
+}
+
+.home--day .home__art-label {
+  color: #0f172a;
+}
+
+.home--night {
+  background: var(--bg-base, #0b0c10);
+  color: var(--text-primary);
 }
 
 /* One soft accent glow behind the hero — the only decoration */
@@ -23,6 +108,7 @@
 }
 
 .home > * { position: relative; }
+
 
 /* ── Navbar ─────────────────────────────────────────────── */
 .home__nav {

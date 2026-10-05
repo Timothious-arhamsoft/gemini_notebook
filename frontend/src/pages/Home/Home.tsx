@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
+import { useDayNightTheme } from '../../hooks/useDayNightTheme'
 import './Home.css'
 
 /* ── Slide illustrations (pure CSS mockups) ───────────────── */
@@ -100,6 +101,7 @@ const AUTOPLAY_DELAY = 2000
 
 export function Home() {
   const { isAuthenticated } = useAuth()
+  const { isDay, toggleTheme } = useDayNightTheme()
   const [active, setActive] = useState(0)
   const [paused, setPaused] = useState(false)
   const touchX = useRef<number | null>(null)
@@ -131,7 +133,7 @@ export function Home() {
   }
 
   return (
-    <main className="home">
+    <main className={`home ${isDay ? 'home--day' : 'home--night'}`}>
       <nav className="home__nav">
         <div className="home__nav-logo">
           <svg width="22" height="22" viewBox="0 0 28 28" fill="none" aria-hidden="true">
@@ -148,6 +150,33 @@ export function Home() {
         </div>
 
         <div className="home__nav-links">
+          {/* Day / Night Theme Toggle */}
+          <button
+            type="button"
+            className="home__theme-toggle"
+            onClick={toggleTheme}
+            title={isDay ? "Switch to Night Mode" : "Switch to Day Mode"}
+            aria-label={isDay ? "Switch to Night Mode" : "Switch to Day Mode"}
+          >
+            {isDay ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="5"/>
+                <line x1="12" y1="1" x2="12" y2="3"/>
+                <line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/>
+                <line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              </svg>
+            )}
+          </button>
+
           {isAuthenticated ? (
             <Link
               to="/dashboard"
@@ -171,6 +200,7 @@ export function Home() {
           )}
         </div>
       </nav>
+
 
       <section className="home__hero">
         <span className="home__eyebrow">
