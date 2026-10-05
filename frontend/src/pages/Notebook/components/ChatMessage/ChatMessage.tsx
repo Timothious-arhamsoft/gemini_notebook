@@ -1,6 +1,11 @@
-import type { ChatMessage as ChatMessageType } from '../../../../types'
+import type { ChatMessage as ChatMessageType, Citation } from '../../../../types'
 
-export function ChatMessage({ message }: { message: ChatMessageType }) {
+interface Props {
+  message: ChatMessageType
+  onCitationClick?: (citation: Citation) => void
+}
+
+export function ChatMessage({ message, onCitationClick }: Props) {
   const isUser = message.role === 'user'
 
   return (
@@ -19,10 +24,18 @@ export function ChatMessage({ message }: { message: ChatMessageType }) {
 
         {message.citations && message.citations.length > 0 && (
           <div className="chat-msg__citations">
-            <p className="chat-msg__citations-label">Sources</p>
+            <p className="chat-msg__citations-label">Sources &amp; Citations</p>
             <div className="chat-msg__citations-list">
               {message.citations.map((c, i) => (
-                <div key={i} className="chat-msg__citation">
+                <div
+                  key={i}
+                  className="chat-msg__citation"
+                  onClick={() => onCitationClick?.(c)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={e => e.key === 'Enter' && onCitationClick?.(c)}
+                  title="Click to view highlighted chunk citation in sidebar"
+                >
                   <span className="chat-msg__citation-num">{i + 1}</span>
                   <div>
                     <p className="chat-msg__citation-title">{c.source_title}</p>

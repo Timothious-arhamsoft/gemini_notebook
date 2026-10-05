@@ -29,3 +29,7 @@ pytest-asyncio
 # JWT and security
 python-jose[cryptography]
 
+# Document Parsing & Ingestion
+pymupdf
+python-docx
+

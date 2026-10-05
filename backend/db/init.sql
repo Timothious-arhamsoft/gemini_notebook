@@ -34,13 +34,13 @@ CREATE TABLE IF NOT EXISTS notebooks (
 CREATE TABLE IF NOT EXISTS sources (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     notebook_id     UUID NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
-    source_type     VARCHAR(50) NOT NULL CHECK (source_type IN ('pdf', 'txt', 'url', 'youtube', 'pasted_text')),
+    source_type     VARCHAR(50) NOT NULL CHECK (source_type IN ('pdf', 'txt', 'md', 'markdown', 'docx', 'url', 'youtube', 'pasted_text')),
     title           VARCHAR(500),
     file_path       TEXT,          -- local storage path if uploaded file
     raw_url         TEXT,          -- original URL if web source
     content_text    TEXT,          -- extracted plain text
     token_count     INTEGER,
-    status          VARCHAR(50) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'ready', 'error')),
+    status          VARCHAR(50) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'ready', 'error', 'failed')),
     error_message   TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()

@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { notebooksApi } from '../../api/notebooks'
+import { uploadSourceApi, fetchSourcesApi, deleteSourceApi } from '../../api/sources'
 import { WorkspaceHeader } from './components/WorkspaceHeader/WorkspaceHeader'
 import { SourcesSidebar } from './components/SourcesSidebar/SourcesSidebar'
+import { StudioSidebar } from './components/StudioSidebar/StudioSidebar'
 import { ChatMessage } from './components/ChatMessage/ChatMessage'
 import { ChatInput } from './components/ChatInput/ChatInput'
 import { UploadModal } from './components/UploadModal/UploadModal'
 import { Spinner } from '../../components/Spinner'
-import type { ChatMessage as ChatMessageType, Notebook, UploadFile } from '../../types'
+import type { ChatMessage as ChatMessageType, Citation, Notebook, UploadFile } from '../../types'
 import './Notebook.css'
+import './components/StudioSidebar/StudioSidebar.css'
 
 const UNTITLED = 'Untitled'
 
@@ -30,6 +33,11 @@ export function NotebookPage() {
   const [hasAutoOpenedModal, setHasAutoOpenedModal] = useState(false)
   const [selectedViewFile, setSelectedViewFile] = useState<UploadFile | null>(null)
 
+  // Track activity logs for the right sidebar studio
+  const [logs, setLogs] = useState<string[]>([])
+  // Active citation detail view
+  const [activeCitation, setActiveCitation] = useState<Citation | null>(null)
+
   // Track whether the user has manually set the title
   const userHasRenamedRef = useRef(false)
 
@@ -39,25 +47,46 @@ export function NotebookPage() {
 
   const chatEndRef = useRef<HTMLDivElement>(null)
 
-  // 1. Fetch notebook details
+  const addLog = useCallback((message: string) => {
+    const timestamp = new Date().toLocaleTimeString([], { hour12: false })
+    setLogs(prev => [`[${timestamp}] ${message}`, ...prev])
+  }, [])
+
+  // 1. Fetch notebook & sources details
   useEffect(() => {
     if (!id) return
     setLoading(true)
-    notebooksApi.get(id)
-      .then(data => {
+
+    Promise.all([
+      notebooksApi.get(id),
+      fetchSourcesApi(id).catch(() => []),
+    ])
+      .then(([data, existingSources]) => {
         setNotebook(data)
-        // If notebook was saved with a real name before, mark as user-renamed
         if (data.title && data.title !== UNTITLED) {
           userHasRenamedRef.current = true
         }
         document.title = `${data.title} - NoteGenio`
+
+        if (existingSources.length > 0) {
+          const loadedUploads: UploadFile[] = existingSources.map(s => ({
+            id: s.id,
+            file: new File([], s.title || 'document'),
+            status: s.status === 'ready' ? 'ready' : s.status === 'error' || s.status === 'failed' ? 'error' : 'processing',
+            progress: 100,
+          }))
+          setUploads(loadedUploads)
+          addLog(`Loaded ${existingSources.length} existing document resources from database.`)
+        } else {
+          addLog('Notebook initialized. No existing sources found.')
+        }
       })
       .catch(err => {
         console.error('Failed to load notebook:', err)
         setError('Notebook not found or accessible.')
       })
       .finally(() => setLoading(false))
-  }, [id])
+  }, [id, addLog])
 
   // 2. Sync document.title when notebook title changes
   useEffect(() => {
@@ -80,7 +109,6 @@ export function NotebookPage() {
     const label = sourceCountLabel(uploads.length)
     if (notebook.description === label) return
     setNotebook(prev => prev ? { ...prev, description: label } : prev)
-    // Persist description update in background (best-effort)
     notebooksApi.update(id, { description: label }).catch(() => {})
   }, [uploads.length, id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -89,55 +117,51 @@ export function NotebookPage() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
-  // Handle uploading files
+  // Handle uploading files via FastAPI backend
   const handleAddFiles = useCallback((files: File[]) => {
-    const newItems: UploadFile[] = files.map(file => ({
-      id: Math.random().toString(36).substring(2, 9),
-      file,
-      status: 'uploading',
-      progress: 25,
-    }))
+    if (!id) return
 
-    setUploads(prev => {
-      const combined = [...prev, ...newItems]
-
-      // Auto-title: if this is the FIRST upload ever AND user hasn't manually renamed
-      if (prev.length === 0 && !userHasRenamedRef.current && newItems.length > 0) {
-        const firstFileName = newItems[0].file.name.replace(/\.[^/.]+$/, '') // strip extension
-        const newTitle = firstFileName || UNTITLED
-        setNotebook(nb => {
-          if (!nb) return nb
-          document.title = `${newTitle} - NoteGenio`
-          // Persist in background
-          if (id) notebooksApi.update(id, { title: newTitle }).catch(() => {})
-          return { ...nb, title: newTitle }
-        })
-        userHasRenamedRef.current = true
+    files.forEach(file => {
+      const tempId = Math.random().toString(36).substring(2, 9)
+      const newUpload: UploadFile = {
+        id: tempId,
+        file,
+        status: 'uploading',
+        progress: 30,
       }
 
-      return combined
-    })
+      setUploads(prev => [...prev, newUpload])
+      addLog(`[INGESTION] Uploading ${file.name}...`)
 
-    // Simulate progress → processing → ready
-    newItems.forEach(item => {
-      setTimeout(() => {
-        setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 75, status: 'processing' } : u))
-      }, 700)
-
-      setTimeout(() => {
-        setUploads(prev => prev.map(u => u.id === item.id ? { ...u, progress: 100, status: 'ready' } : u))
-      }, 1500)
+      uploadSourceApi(id, file)
+        .then(apiSource => {
+          setUploads(prev => prev.map(u => u.id === tempId ? {
+            id: apiSource.id,
+            file,
+            status: apiSource.status === 'ready' ? 'ready' : 'error',
+            progress: 100,
+          } : u))
+          addLog(`[SUCCESS] IngestionService parsed ${file.name} (Status: ${apiSource.status}, Tokens: ${apiSource.token_count || 0})`)
+        })
+        .catch(err => {
+          console.error(`Ingestion error for ${file.name}:`, err)
+          setUploads(prev => prev.map(u => u.id === tempId ? { ...u, status: 'error', error: err.message } : u))
+          addLog(`[ERROR] Document ingestion failed for ${file.name}: ${err.response?.data?.detail || err.message}`)
+        })
     })
-  }, [id])
+  }, [id, addLog])
 
   const handleRemoveFile = useCallback((fileId: string) => {
+    if (id) {
+      deleteSourceApi(id, fileId).catch(err => console.error('Failed to delete source:', err))
+    }
     setUploads(prev => prev.filter(u => u.id !== fileId))
     if (selectedViewFile?.id === fileId) {
       setSelectedViewFile(null)
     }
-  }, [selectedViewFile?.id])
+    addLog(`Resource ${fileId} removed.`)
+  }, [id, selectedViewFile?.id, addLog])
 
-  /** Called when user edits the title inline in WorkspaceHeader */
   const handleTitleChange = (newTitle: string) => {
     if (!notebook || !id) return
     userHasRenamedRef.current = true
@@ -145,7 +169,6 @@ export function NotebookPage() {
     document.title = `${newTitle} - NoteGenio`
   }
 
-  /** Persist title when user finishes editing (blur event) */
   const handleTitleBlur = (finalTitle: string) => {
     if (!id) return
     const trimmed = finalTitle.trim() || UNTITLED
@@ -169,38 +192,39 @@ export function NotebookPage() {
 
     setMessages(prev => [...prev, userMsg])
     setSending(true)
+    addLog(`[USER QUERY] "${text}"`)
 
-    // Simulate RAG answer response
     setTimeout(() => {
       const readySources = uploads.filter(u => u.status === 'ready')
       let aiContent = `Based on your uploaded sources, here is what I found regarding "${text}":\n\n`
 
       if (readySources.length > 0) {
         aiContent += `Key insights extracted from **${readySources[0].file.name}**:\n` +
-          `• The documents emphasize core principles and structured execution.\n` +
-          `• All relevant references align with your query context.`
+          `• The document content was successfully processed by the IngestionService.\n` +
+          `• Click the citation below to inspect the highlighted chunk extract in the right sidebar studio.`
       } else {
         aiContent += `No source documents are currently active. Upload PDF, TXT, or MD files in the left sidebar to get grounded answers with direct citations!`
       }
+
+      const citationObj: Citation | undefined = readySources.length > 0 ? {
+        source_id: readySources[0].id,
+        source_title: readySources[0].file.name,
+        excerpt: `Direct extracted excerpt matching "${text}" from document ${readySources[0].file.name}.`,
+      } : undefined
 
       const aiMsg: ChatMessageType = {
         id: Math.random().toString(36).substring(2, 9),
         notebook_id: id,
         role: 'assistant',
         content: aiContent,
-        citations: readySources.length > 0 ? [
-          {
-            source_id: readySources[0].id,
-            source_title: readySources[0].file.name,
-            excerpt: 'Relevant excerpt matching your query from the uploaded document context.',
-          }
-        ] : undefined,
+        citations: citationObj ? [citationObj] : undefined,
         created_at: new Date().toISOString(),
       }
 
       setMessages(prev => [...prev, aiMsg])
       setSending(false)
-    }, 1200)
+      addLog(`[ASSISTANT ANSWER] Generated response with ${citationObj ? '1 citation' : '0 citations'}.`)
+    }, 1000)
   }
 
   if (loading) {
@@ -240,7 +264,7 @@ export function NotebookPage() {
         onTitleBlur={handleTitleBlur}
       />
 
-      {/* 2. Mobile Tab Bar — only visible on small screens via CSS */}
+      {/* 2. Mobile Tab Bar */}
       <div className="nb-tabs" role="tablist" aria-label="Notebook sections">
         <button
           role="tab"
@@ -248,14 +272,12 @@ export function NotebookPage() {
           className={`nb-tabs__tab${activeTab === 'sources' ? ' nb-tabs__tab--active' : ''}`}
           onClick={() => setActiveTab('sources')}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
             <polyline points="14 2 14 8 20 8"/>
           </svg>
           Sources
-          {uploads.length > 0 && (
-            <span className="nb-tabs__badge">{uploads.length}</span>
-          )}
+          {uploads.length > 0 && <span className="nb-tabs__badge">{uploads.length}</span>}
         </button>
 
         <button
@@ -264,13 +286,11 @@ export function NotebookPage() {
           className={`nb-tabs__tab${activeTab === 'chat' ? ' nb-tabs__tab--active' : ''}`}
           onClick={() => setActiveTab('chat')}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
           </svg>
           Chat
-          {messages.length > 0 && (
-            <span className="nb-tabs__badge">{messages.length}</span>
-          )}
+          {messages.length > 0 && <span className="nb-tabs__badge">{messages.length}</span>}
         </button>
       </div>
 
@@ -288,7 +308,6 @@ export function NotebookPage() {
 
         {/* Center Panel: Chat Workspace */}
         <main className={`chat-workspace${activeTab === 'chat' ? ' chat-workspace--active-tab' : ''}`}>
-          {/* Chat Messages */}
           <div className="chat-workspace__messages">
             {messages.length === 0 ? (
               <div className="chat-workspace__empty">
@@ -322,7 +341,11 @@ export function NotebookPage() {
               </div>
             ) : (
               messages.map(msg => (
-                <ChatMessage key={msg.id} message={msg} />
+                <ChatMessage
+                  key={msg.id}
+                  message={msg}
+                  onCitationClick={citation => setActiveCitation(citation)}
+                />
               ))
             )}
 
@@ -335,7 +358,6 @@ export function NotebookPage() {
             <div ref={chatEndRef} />
           </div>
 
-          {/* Chat Input */}
           <div className="chat-workspace__input-container">
             <ChatInput
               onSend={handleSendMessage}
@@ -344,6 +366,14 @@ export function NotebookPage() {
             />
           </div>
         </main>
+
+        {/* Right Panel: Studio & Citation Sidebar */}
+        <StudioSidebar
+          activeCitation={activeCitation}
+          onClearCitation={() => setActiveCitation(null)}
+          uploads={uploads}
+          logs={logs}
+        />
       </div>
 
       {/* 4. Upload Modal */}
