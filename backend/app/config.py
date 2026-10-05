@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     # CORS
     allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # JWT — override SECRET_KEY in .env for production!
+    secret_key: str = "dev-secret-change-me-in-production"
+
     # Gemini
     gemini_api_key: str = ""
 
