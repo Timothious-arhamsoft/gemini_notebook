@@ -4,7 +4,7 @@ import { ProtectedRoute, PublicRoute } from './guards'
 import { Home } from '../pages/Home'
 import { Auth } from '../pages/Auth'
 import { Dashboard } from '../pages/Dashboard'
-// import { Notebook } from '../pages/Notebook'
+import { Notebook } from '../pages/Notebook'
 
 export function AppRouter() {
   return (
@@ -24,7 +24,7 @@ export function AppRouter() {
           {/* Protected routes — redirect to /auth if not logged in */}
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<Dashboard />} />
-            {/* <Route path="/notebook/:id" element={<Notebook />} /> */}
+            <Route path="/notebook/:id" element={<Notebook />} />
           </Route>
 
           {/* 404 fallback */}
