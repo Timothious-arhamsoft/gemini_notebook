@@ -714,6 +714,76 @@
   max-height: 70vh;
   overflow-y: auto;
 }
+.modal-card__error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  border: 1px solid #fda29b;
+  border-radius: 8px;
+  background: #fffbfa;
+  color: #b42318;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  animation: error-slide-in 0.15s ease-out;
+}
+
+.modal-card__error svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #d92d20;
+}
+
+.modal-card__error span {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal-card__error-dismiss {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: -3px -3px 0 0;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #b42318;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.modal-card__error-dismiss:hover {
+  background: #fee4e2;
+  color: #912018;
+}
+
+.modal-card__error-dismiss:focus-visible {
+  outline: 2px solid #f04438;
+  outline-offset: 2px;
+}
+
+@keyframes error-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
 
 .modal-card__footer {
   display: flex;
