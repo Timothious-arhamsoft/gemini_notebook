@@ -96,7 +96,7 @@ const FEATURES = [
   },
 ]
 
-const AUTOPLAY_DELAY = 3000
+const AUTOPLAY_DELAY = 2000
 
 export function Home() {
   const { isAuthenticated } = useAuth()

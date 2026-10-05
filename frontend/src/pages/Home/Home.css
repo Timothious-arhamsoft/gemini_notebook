@@ -271,7 +271,7 @@
   inset: 0;
   background: var(--accent);
   transform-origin: left center;
-  animation: home-progress 3s linear forwards;
+  animation: home-progress 2s linear forwards;
 }
 .home__features[data-paused='true'] .home__dot-fill { animation-play-state: paused; }
 
