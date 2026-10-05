@@ -8,6 +8,7 @@ interface Props {
   onOpenUploadModal: () => void
   activePreviewFile?: UploadFile | null
   onSelectFile?: (file: UploadFile | null) => void
+  activeTab?: 'sources' | 'chat'
 }
 
 export function SourcesSidebar({
@@ -16,6 +17,7 @@ export function SourcesSidebar({
   onOpenUploadModal,
   activePreviewFile: externalPreviewFile,
   onSelectFile,
+  activeTab,
 }: Props) {
   const [internalPreviewFile, setInternalPreviewFile] = useState<UploadFile | null>(null)
   
@@ -65,7 +67,7 @@ export function SourcesSidebar({
     const isPdf = activeFile.file.type === 'application/pdf' || activeFile.file.name.toLowerCase().endsWith('.pdf')
 
     return (
-      <aside className="sources-sidebar sources-sidebar--preview">
+      <aside className={`sources-sidebar sources-sidebar--preview${activeTab === 'sources' ? ' sources-sidebar--active-tab' : ''}`}>
         {/* Inline Preview Header */}
         <div className="sidebar-preview__header">
           <button
@@ -131,7 +133,7 @@ export function SourcesSidebar({
 
   // 2. ORIGINAL STATE MODE (Header with Add Source button & uploaded docs list)
   return (
-    <aside className="sources-sidebar">
+    <aside className={`sources-sidebar${activeTab === 'sources' ? ' sources-sidebar--active-tab' : ''}`}>
       {/* Sidebar Header */}
       <div className="sources-sidebar__header">
         <div className="sources-sidebar__header-title">

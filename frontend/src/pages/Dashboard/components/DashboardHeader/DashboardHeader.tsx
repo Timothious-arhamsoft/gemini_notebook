@@ -59,17 +59,50 @@ export function DashboardHeader({ onNewNotebook }: DashboardHeaderProps) {
       : 'U'
 
   const displayName = user?.full_name || user?.username || user?.email || 'User'
-
+  const handleHome = () => {
+    navigate('/')
+  }
   return (
     <header className="dash-header">
       <div className="dash-header__left">
         <div className="dash-header__logo">
-          <svg width="22" height="22" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-            <rect width="28" height="28" rx="8" fill="var(--accent)" />
-            <path d="M8 8h8a6 6 0 0 1 0 12H8V8Z" fill="white" opacity="0.9" />
-            <circle cx="19" cy="20" r="2.5" fill="white" opacity="0.6" />
-          </svg>
-          <span className="dash-header__logo-text">NoteGenio</span>
+          <button
+            type="button"
+            className="dash-header__logo"
+            onClick={handleHome}
+            aria-label="Go to home page"
+          >
+            <svg
+              width="22"
+              height="22"
+              viewBox="0 0 28 28"
+              fill="none"
+              aria-hidden="true"
+            >
+              <rect
+                width="28"
+                height="28"
+                rx="8"
+                fill="var(--accent)"
+              />
+              <path
+                d="M8 8h8a6 6 0 0 1 0 12H8V8Z"
+                fill="white"
+                opacity="0.9"
+              />
+              <circle
+                cx="19"
+                cy="20"
+                r="2.5"
+                fill="white"
+                opacity="0.6"
+              />
+            </svg>
+
+            <span className="dash-header__logo-text">
+              NoteGenio
+            </span>
+          </button>
         </div>
       </div>
 

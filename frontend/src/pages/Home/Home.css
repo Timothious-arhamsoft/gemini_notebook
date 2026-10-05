@@ -18,11 +18,10 @@
 
 /* ── Day & Night Theme Overrides ───────────────────────── */
 .home--day {
-  background: radial-gradient(circle at 50% 10%, #f8fafc 0%, #f1f5f9 60%, #e2e8f0 100%);
   color: #0f172a;
 }
 .home--day::before {
-  background: radial-gradient(ellipse at center, rgba(109, 106, 255, 0.15) 0%, transparent 70%);
+  background: radial-gradient(ellipse at center, rgba(91, 79, 207, 0.12) 0%, transparent 70%);
 }
 
 .home--day .home__nav {
@@ -95,6 +94,15 @@
 }
 
 /* One soft accent glow behind the hero — the only decoration */
+.home {
+  position: relative;
+  flex: 1;                  /* fill the full #root flex container */
+  min-height: 100vh;        /* still full-screen when content is short */
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
 .home::before {
   content: '';
   position: absolute;
@@ -105,9 +113,10 @@
   transform: translateX(-50%);
   background: radial-gradient(ellipse at center, var(--accent-dim) 0%, transparent 70%);
   pointer-events: none;
+  z-index: 0;
 }
 
-.home > * { position: relative; }
+.home > * { position: relative; z-index: 1; }
 
 
 /* ── Navbar ─────────────────────────────────────────────── */
@@ -421,6 +430,42 @@
 }
 
 .home__art-label { font-size: 13.5px; font-weight: 500; color: var(--text-primary); }
+
+.home--day {
+  --accent: #5b4fcf;
+  --accent-hover: #4f44bd;
+  --accent-text: #3d34a5;
+  --accent-dim: rgba(91, 79, 207, 0.12);
+  background: radial-gradient(circle at 50% 0%, #f0f4ff 0%, #f8fafc 55%, #eef2f8 100%);
+}
+
+.home--day .home__eyebrow {
+  color: #5146b8;
+  border-color: rgba(91, 79, 207, 0.25);
+}
+
+.home--day .home__art-badge,
+.home--day .home__art-chip {
+  color: #5146b8;
+  background: rgba(91, 79, 207, 0.10);
+}
+
+.home--day .home__bar--accent {
+  background: #5b4fcf;
+}
+
+.home--day .home__primary,
+.home--day .home__nav-btn--primary {
+  background: #5b4fcf;
+  border-color: #5b4fcf;
+}
+
+.home--day .home__primary:hover,
+.home--day .home__nav-btn--primary:hover {
+  background: #4f44bd;
+  border-color: #4f44bd;
+}
+
 
 /* ── Responsive ─────────────────────────────────────────── */
 @media (max-width: 600px) {

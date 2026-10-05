@@ -9,6 +9,11 @@ export function useDayNightTheme() {
 
   const [isDay, setIsDay] = useState(checkIsDay)
 
+  // Sync html[data-theme] so overscroll area background matches theme
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', isDay ? 'day' : 'night')
+  }, [isDay])
+
   // Live timer interval to sync theme with local time
   useEffect(() => {
     const updateTheme = () => {

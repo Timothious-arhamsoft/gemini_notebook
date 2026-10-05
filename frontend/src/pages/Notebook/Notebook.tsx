@@ -35,6 +35,7 @@ export function NotebookPage() {
 
   const [messages, setMessages] = useState<ChatMessageType[]>([])
   const [sending, setSending] = useState(false)
+  const [activeTab, setActiveTab] = useState<'sources' | 'chat'>('chat')
 
   const chatEndRef = useRef<HTMLDivElement>(null)
 
@@ -239,19 +240,54 @@ export function NotebookPage() {
         onTitleBlur={handleTitleBlur}
       />
 
-      {/* 2. Main Workspace Layout */}
+      {/* 2. Mobile Tab Bar — only visible on small screens via CSS */}
+      <div className="nb-tabs" role="tablist" aria-label="Notebook sections">
+        <button
+          role="tab"
+          aria-selected={activeTab === 'sources'}
+          className={`nb-tabs__tab${activeTab === 'sources' ? ' nb-tabs__tab--active' : ''}`}
+          onClick={() => setActiveTab('sources')}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+          Sources
+          {uploads.length > 0 && (
+            <span className="nb-tabs__badge">{uploads.length}</span>
+          )}
+        </button>
+
+        <button
+          role="tab"
+          aria-selected={activeTab === 'chat'}
+          className={`nb-tabs__tab${activeTab === 'chat' ? ' nb-tabs__tab--active' : ''}`}
+          onClick={() => setActiveTab('chat')}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          Chat
+          {messages.length > 0 && (
+            <span className="nb-tabs__badge">{messages.length}</span>
+          )}
+        </button>
+      </div>
+
+      {/* 3. Main Workspace Layout */}
       <div className="notebook-workspace__body">
-        {/* Left Panel: Sources Sidebar with inline preview */}
+        {/* Left Panel: Sources Sidebar */}
         <SourcesSidebar
           uploads={uploads}
           onRemove={handleRemoveFile}
-          onOpenUploadModal={() => setShowUploadModal(true)}
+          onOpenUploadModal={() => { setShowUploadModal(true); setActiveTab('sources') }}
           activePreviewFile={selectedViewFile}
           onSelectFile={file => setSelectedViewFile(file)}
+          activeTab={activeTab}
         />
 
         {/* Center Panel: Chat Workspace */}
-        <main className="chat-workspace">
+        <main className={`chat-workspace${activeTab === 'chat' ? ' chat-workspace--active-tab' : ''}`}>
           {/* Chat Messages */}
           <div className="chat-workspace__messages">
             {messages.length === 0 ? (
@@ -293,7 +329,7 @@ export function NotebookPage() {
             {sending && (
               <div className="chat-workspace__typing">
                 <Spinner size="sm" />
-                <span>Thinking & analyzing sources…</span>
+                <span>Thinking &amp; analyzing sources…</span>
               </div>
             )}
             <div ref={chatEndRef} />
@@ -310,7 +346,7 @@ export function NotebookPage() {
         </main>
       </div>
 
-      {/* 3. Upload Modal Pop-Up */}
+      {/* 4. Upload Modal */}
       {showUploadModal && (
         <UploadModal
           uploads={uploads}
