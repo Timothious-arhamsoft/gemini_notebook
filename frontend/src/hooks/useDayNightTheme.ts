@@ -1,29 +1,35 @@
 import { useState, useEffect } from 'react'
 
+const THEME_KEY = 'theme'
+
 export function useDayNightTheme() {
-  // Helper to determine if local system time is between 6 AM and 6 PM
-  const checkIsDay = () => {
+  const getInitialIsDay = () => {
+    const saved = localStorage.getItem(THEME_KEY)
+    if (saved === 'day') return true
+    if (saved === 'night') return false
     const hour = new Date().getHours()
     return hour >= 6 && hour < 18
   }
 
-  const [isDay, setIsDay] = useState(checkIsDay)
+  const [isDay, setIsDay] = useState(getInitialIsDay)
 
-  // Sync html[data-theme] so overscroll area background matches theme
+  // Sync html[data-theme] attribute and localStorage whenever state changes
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', isDay ? 'day' : 'night')
+    const theme = isDay ? 'day' : 'night'
+    document.documentElement.setAttribute('data-theme', theme)
+    localStorage.setItem(THEME_KEY, theme)
   }, [isDay])
 
-  // Live timer interval to sync theme with local time
+  // Listen for storage events (e.g. across tabs or components)
   useEffect(() => {
-    const updateTheme = () => {
-      setIsDay(checkIsDay())
+    const handleStorageChange = () => {
+      const saved = localStorage.getItem(THEME_KEY)
+      if (saved === 'day') setIsDay(true)
+      else if (saved === 'night') setIsDay(false)
     }
 
-    updateTheme()
-    const timer = setInterval(updateTheme, 30000) // check every 30s
-
-    return () => clearInterval(timer)
+    window.addEventListener('storage', handleStorageChange)
+    return () => window.removeEventListener('storage', handleStorageChange)
   }, [])
 
   const toggleTheme = () => setIsDay(prev => !prev)

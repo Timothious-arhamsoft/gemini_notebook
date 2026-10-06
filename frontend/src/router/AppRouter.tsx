@@ -5,8 +5,11 @@ import { Home } from '../pages/Home'
 import { Auth } from '../pages/Auth'
 import { Dashboard } from '../pages/Dashboard'
 import { Notebook } from '../pages/Notebook'
+import { useDayNightTheme } from '../hooks/useDayNightTheme'
 
 export function AppRouter() {
+  useDayNightTheme()
+
   return (
     <BrowserRouter>
       <AuthProvider>
