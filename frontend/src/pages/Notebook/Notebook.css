@@ -416,6 +416,57 @@
   margin: 0;
 }
 
+.sidebar-preview__docx {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: auto;
+  background: #525659;
+  color: #1e293b;
+  box-sizing: border-box;
+}
+
+.sidebar-preview__docx .docx-wrapper {
+  background: #525659 !important;
+  padding: 16px 10px !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.sidebar-preview__docx .docx-wrapper > section.docx {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35) !important;
+  margin-bottom: 16px !important;
+  padding: 2rem !important;
+  background: #ffffff !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: auto !important;
+  box-sizing: border-box !important;
+  border-radius: 2px;
+}
+
+.sidebar-preview__docx img {
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+  margin: 0.5rem auto;
+}
+
+.sidebar-preview__docx table {
+  border-collapse: collapse;
+  width: 100% !important;
+  margin: 0.5rem 0;
+}
+
+.sidebar-preview__docx th,
+.sidebar-preview__docx td {
+  border: 1px solid #cbd5e1;
+  padding: 0.4rem 0.5rem;
+}
+
 .sidebar-preview__fallback {
   display: flex;
   flex-direction: column;

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { renderAsync } from 'docx-preview'
 import { getFileTypeConfig, formatFileSize } from '../SourceUpload'
 import { apiClient } from '../../../../api/client'
 import type { UploadFile } from '../../../../types'
@@ -35,49 +36,65 @@ export function SourcesSidebar({
     }
   }
 
-  // Effect for Object URL & Text reading during inline sidebar preview
+  // Effect for Object URL, Text reading & DOCX blob preview
   const [objectUrl, setObjectUrl] = useState<string | null>(null)
   const [textContent, setTextContent] = useState<string | null>(null)
+  const [docxBlob, setDocxBlob] = useState<Blob | null>(null)
+  const [docxLoading, setDocxLoading] = useState<boolean>(false)
+  const [docxRenderError, setDocxRenderError] = useState<boolean>(false)
+  
+  const docxContainerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!activeFile) {
       setObjectUrl(null)
       setTextContent(null)
+      setDocxBlob(null)
+      setDocxLoading(false)
+      setDocxRenderError(false)
       return
     }
 
     const fileNameLower = activeFile.file.name.toLowerCase()
     const isDocx = fileNameLower.endsWith('.docx') || fileNameLower.endsWith('.doc')
+    const isPdf = activeFile.file.type === 'application/pdf' || fileNameLower.endsWith('.pdf')
     const isText = activeFile.file.type.includes('text') || 
                    fileNameLower.endsWith('.txt') || 
                    fileNameLower.endsWith('.md')
 
-    // If docx or text file has extracted content_text, use it immediately
-    if ((isDocx || isText) && activeFile.content_text) {
-      setTextContent(activeFile.content_text)
-      setObjectUrl(null)
-      return
-    }
-
     let createdBlobUrl: string | null = null
 
-    // 1. If file has local bytes (freshly uploaded in current session)
-    if (activeFile.file.size > 0) {
-      if (isText) {
+    if (isText) {
+      setDocxBlob(null)
+      if (activeFile.file.size > 0) {
         activeFile.file.text().then(text => setTextContent(text)).catch(() => setTextContent(activeFile.content_text ?? null))
-      } else if (!isDocx) {
-        const url = URL.createObjectURL(activeFile.file)
-        createdBlobUrl = url
-        setObjectUrl(url)
-        setTextContent(activeFile.content_text ?? null)
       } else {
         setTextContent(activeFile.content_text ?? null)
       }
-    } else if (notebookId && activeFile.id) {
-      // 2. Restored file after refresh — fetch PDF blob or use content_text
-      const isPdf = activeFile.file.type === 'application/pdf' || fileNameLower.endsWith('.pdf')
-
-      if (isPdf) {
+    } else if (isDocx) {
+      setTextContent(activeFile.content_text ?? null)
+      if (activeFile.file.size > 0) {
+        setDocxBlob(activeFile.file)
+      } else if (notebookId && activeFile.id) {
+        setDocxLoading(true)
+        apiClient.get(`/notebooks/${notebookId}/sources/${activeFile.id}/file`, { responseType: 'blob' })
+          .then(res => {
+            setDocxBlob(res.data)
+          })
+          .catch(err => {
+            console.error('Failed to load docx file blob:', err)
+            setDocxRenderError(true)
+            setDocxLoading(false)
+          })
+      }
+    } else if (isPdf) {
+      setTextContent(activeFile.content_text ?? null)
+      setDocxBlob(null)
+      if (activeFile.file.size > 0) {
+        const url = URL.createObjectURL(activeFile.file)
+        createdBlobUrl = url
+        setObjectUrl(url)
+      } else if (notebookId && activeFile.id) {
         apiClient.get(`/notebooks/${notebookId}/sources/${activeFile.id}/file`, { responseType: 'blob' })
           .then(res => {
             const blobUrl = URL.createObjectURL(res.data)
@@ -85,14 +102,13 @@ export function SourcesSidebar({
             setObjectUrl(blobUrl)
           })
           .catch(err => {
-            console.error('Failed to load document file blob:', err)
+            console.error('Failed to load PDF file blob:', err)
             setObjectUrl(null)
           })
-      } else {
-        setTextContent(activeFile.content_text ?? null)
       }
     } else {
       setTextContent(activeFile.content_text ?? null)
+      setDocxBlob(null)
     }
 
     return () => {
@@ -101,6 +117,34 @@ export function SourcesSidebar({
       }
     }
   }, [activeFile, notebookId])
+
+  // Effect to trigger docx-preview renderAsync when container ref and docxBlob are ready
+  useEffect(() => {
+    const fileNameLower = activeFile?.file.name.toLowerCase() ?? ''
+    const isDocx = fileNameLower.endsWith('.docx') || fileNameLower.endsWith('.doc')
+
+    if (isDocx && docxBlob && docxContainerRef.current) {
+      setDocxLoading(true)
+      setDocxRenderError(false)
+      docxContainerRef.current.innerHTML = ''
+
+      renderAsync(docxBlob, docxContainerRef.current, undefined, {
+        inWrapper: true,
+        ignoreWidth: false,
+        ignoreHeight: false,
+        breakPages: true,
+        experimental: true,
+      })
+        .then(() => {
+          setDocxLoading(false)
+        })
+        .catch(err => {
+          console.error('docx-preview render error:', err)
+          setDocxRenderError(true)
+          setDocxLoading(false)
+        })
+    }
+  }, [docxBlob, activeFile])
 
   // 1. INLINE PREVIEW MODE (When a file is selected)
   if (activeFile) {
@@ -156,9 +200,24 @@ export function SourcesSidebar({
               title={activeFile.file.name}
               className="sidebar-preview__iframe"
             />
-          ) : isDocx || displayContent ? (
+          ) : isDocx ? (
+            <>
+              {docxLoading && <div className="sidebar-preview__fallback">Loading formatted document preview...</div>}
+              {docxRenderError ? (
+                <pre className="sidebar-preview__text">
+                  {displayContent || 'No extracted text available for this document.'}
+                </pre>
+              ) : (
+                <div
+                  ref={docxContainerRef}
+                  className="sidebar-preview__docx"
+                  style={{ display: docxLoading ? 'none' : 'block' }}
+                />
+              )}
+            </>
+          ) : displayContent ? (
             <pre className="sidebar-preview__text">
-              {displayContent || 'No extracted text available for this document.'}
+              {displayContent}
             </pre>
           ) : objectUrl ? (
             <div className="sidebar-preview__fallback">
