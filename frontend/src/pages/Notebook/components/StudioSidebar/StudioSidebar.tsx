@@ -33,9 +33,14 @@ function parseLog(raw: string): Omit<Entry, 'count'> {
 
 const STATUS_LABEL: Record<string, string> = {
   ready: 'Ready',
+  completed: 'Ready',
   uploading: 'Uploading…',
-  processing: 'Processing…',
+  processing: 'Extracting…',
+  analyzing: 'Analyzing…',
+  chunking: 'Chunking…',
+  embedding: 'Embedding…',
   error: 'Failed',
+  failed: 'Failed',
 }
 
 const HISTORY_LIMIT = 20

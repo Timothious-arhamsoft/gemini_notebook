@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { notebooksApi } from '../../api/notebooks'
-import { uploadSourceApi, fetchSourcesApi, deleteSourceApi } from '../../api/sources'
+import { uploadSourceApi, fetchSourcesApi, deleteSourceApi, fetchSourceStatusApi } from '../../api/sources'
 import { fetchChatMessagesApi, sendChatMessageApi } from '../../api/chat'
 import { WorkspaceHeader } from './components/WorkspaceHeader/WorkspaceHeader'
 import { SourcesSidebar } from './components/SourcesSidebar/SourcesSidebar'
@@ -10,7 +10,7 @@ import { ChatMessage } from './components/ChatMessage/ChatMessage'
 import { ChatInput } from './components/ChatInput/ChatInput'
 import { UploadModal } from './components/UploadModal/UploadModal'
 import { Spinner } from '../../components/Spinner'
-import type { ChatMessage as ChatMessageType, Citation, Notebook, UploadFile } from '../../types'
+import type { ChatMessage as ChatMessageType, Citation, Notebook, UploadFile, UploadStatus } from '../../types'
 import './Notebook.css'
 import './components/StudioSidebar/StudioSidebar.css'
 
@@ -71,15 +71,19 @@ export function NotebookPage() {
         document.title = `${data.title} - NoteGenio`
 
         if (existingSources.length > 0) {
-          const loadedUploads: UploadFile[] = existingSources.map(s => ({
-            id: s.id,
-            file: new File([], s.title || 'document'),
-            status: s.status === 'ready' ? 'ready' : s.status === 'error' || s.status === 'failed' ? 'error' : 'processing',
-            progress: 100,
-            analysis: s.analysis ?? null,
-            content_text: s.content_text,
-            file_size: s.file_size ?? s.analysis?.total_characters ?? 0,
-          }))
+          const loadedUploads: UploadFile[] = existingSources.map(s => {
+            const isDone = s.status === 'completed' || s.status === 'ready'
+            const isErr = s.status === 'error' || s.status === 'failed'
+            return {
+              id: s.id,
+              file: new File([], s.title || 'document'),
+              status: isDone ? 'ready' : isErr ? 'error' : (s.status as UploadStatus),
+              progress: 100,
+              analysis: s.analysis ?? null,
+              content_text: s.content_text,
+              file_size: s.file_size ?? s.analysis?.total_characters ?? 0,
+            }
+          })
           setUploads(loadedUploads)
           addLog(`Loaded ${existingSources.length} existing document resources from database.`)
 
@@ -195,48 +199,87 @@ export function NotebookPage() {
 
       uploadSourceApi(id, file)
         .then(apiSource => {
-          const analysis = apiSource.analysis ?? null
-
           setUploads(prev =>
             prev.map(u =>
               u.id === tempId
                 ? {
                     id: apiSource.id,
                     file,
-                    status: apiSource.status === 'ready' ? 'ready' : 'error',
-                    progress: 100,
-                    analysis,
+                    status: (apiSource.status as UploadStatus) || 'processing',
+                    progress: 50,
+                    analysis: apiSource.analysis ?? null,
                   }
                 : u
             )
           )
 
-          addLog(
-            `[SUCCESS] IngestionService parsed ${file.name} ` +
-            `(Status: ${apiSource.status}, Tokens: ${apiSource.token_count || 0})`
-          )
+          addLog(`[INGESTION] Saved ${file.name}. Starting runtime analysis & ingestion pipeline...`)
 
-          // Emit analysis activity log
-          if (analysis && !analysis.error) {
-            const chars = analysis.total_characters.toLocaleString()
-            const words = analysis.total_words.toLocaleString()
-            const chunkSize = analysis.recommended_chunk_size
-            const pageInfo = analysis.page_count
-              ? `, Pages: ${analysis.page_count}`
-              : ''
+          // Poll pipeline progress until completion or error
+          const pollStatus = async () => {
+            let lastStatus: string = apiSource.status
+            const maxAttempts = 60
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+              await new Promise(r => setTimeout(r, 1200))
+              try {
+                const statusRes = await fetchSourceStatusApi(id, apiSource.id)
+                const newStatus = statusRes.status
 
-            addLog(
-              `[ANALYSIS] ${file.name} — ${chars} chars, ${words} words` +
-              `${pageInfo}. Recommended chunk size: ~${chunkSize} chars`
-            )
-          } else if (analysis?.error) {
-            addLog(
-              `[WARN] Document analysis failed for ${file.name}: ${analysis.error}`
-            )
+                if (newStatus !== lastStatus || attempt === 0) {
+                  lastStatus = newStatus
+                  setUploads(prev =>
+                    prev.map(u =>
+                      u.id === apiSource.id || u.id === tempId
+                        ? {
+                            ...u,
+                            id: apiSource.id,
+                            status: newStatus === 'completed' ? 'ready' : (newStatus as UploadStatus),
+                            analysis: statusRes.analysis ?? u.analysis,
+                          }
+                        : u
+                    )
+                  )
+
+                  if (newStatus === 'analyzing') {
+                    addLog(`[ANALYSIS] Analyzing layout and text density for ${file.name}...`)
+                  } else if (newStatus === 'chunking') {
+                    const recChunk = statusRes.analysis?.recommended_chunk_size
+                    const chunkInfo = recChunk ? ` (recommended chunk size: ~${recChunk} chars)` : ''
+                    addLog(`[CHUNKING] Splitting ${file.name} into recursive text chunks${chunkInfo}...`)
+                  } else if (newStatus === 'embedding') {
+                    addLog(`[EMBEDDING] Generating 384-dim BGE embeddings for chunks of ${file.name}...`)
+                  } else if (newStatus === 'completed' || newStatus === 'ready') {
+                    const analysis = statusRes.analysis
+                    if (analysis && !analysis.error) {
+                      const chars = analysis.total_characters.toLocaleString()
+                      const words = analysis.total_words.toLocaleString()
+                      const chunkSize = analysis.recommended_chunk_size
+                      const pageInfo = analysis.page_count ? `, Pages: ${analysis.page_count}` : ''
+                      addLog(
+                        `[ANALYSIS] ${file.name} — ${chars} chars, ${words} words${pageInfo}. Rec. chunk: ~${chunkSize} chars`
+                      )
+                    }
+                    addLog(
+                      `[SUCCESS] Runtime RAG pipeline complete for ${file.name}: ${statusRes.chunk_count} chunks embedded & stored in pgvector.`
+                    )
+                    return
+                  } else if (newStatus === 'failed' || newStatus === 'error') {
+                    addLog(
+                      `[ERROR] Document ingestion failed for ${file.name}: ${statusRes.error_message || 'Pipeline error'}`
+                    )
+                    return
+                  }
+                }
+              } catch (err) {
+                console.error(`Polling status error for ${file.name}:`, err)
+              }
+            }
           }
+
+          pollStatus()
         })
         .catch(err => {
-          console.error(`Ingestion error for ${file.name}:`, err)
+          console.error(`Upload error for ${file.name}:`, err)
 
           setUploads(prev =>
             prev.map(u =>
@@ -251,7 +294,7 @@ export function NotebookPage() {
           )
 
           addLog(
-            `[ERROR] Document ingestion failed for ${file.name}: ` +
+            `[ERROR] File upload failed for ${file.name}: ` +
             `${err.response?.data?.detail || err.message}`
           )
         })

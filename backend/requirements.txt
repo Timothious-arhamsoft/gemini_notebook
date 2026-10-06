@@ -18,6 +18,7 @@ sqlalchemy
 alembic
 psycopg2-binary
 psycopg[binary]
+pgvector
 
 # HTTP client
 httpx
@@ -33,3 +34,8 @@ python-jose[cryptography]
 pymupdf
 python-docx
 
+# RAG, Embedding & Splitting
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+sentence-transformers
+langchain-text-splitters

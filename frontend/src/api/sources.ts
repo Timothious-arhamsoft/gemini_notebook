@@ -34,12 +34,22 @@ export interface ApiSource {
   file_path: string | null
   content_text: string | null
   token_count: number | null
-  status: 'pending' | 'processing' | 'ready' | 'error' | 'failed'
+  status: 'pending' | 'processing' | 'analyzing' | 'chunking' | 'embedding' | 'ready' | 'completed' | 'error' | 'failed'
   error_message: string | null
   created_at: string
   updated_at: string
   analysis?: DocumentAnalysisResult | null
   file_size?: number | null
+}
+
+export interface SourceStatusResponse {
+  id: string
+  status: 'pending' | 'processing' | 'analyzing' | 'chunking' | 'embedding' | 'ready' | 'completed' | 'error' | 'failed'
+  error_message: string | null
+  chunk_count: number
+  progress_label: string
+  analysis?: DocumentAnalysisResult | null
+  token_count?: number | null
 }
 
 export async function uploadSourceApi(notebookId: string, file: File): Promise<ApiSource> {
@@ -51,6 +61,11 @@ export async function uploadSourceApi(notebookId: string, file: File): Promise<A
       'Content-Type': 'multipart/form-data',
     },
   })
+  return res.data
+}
+
+export async function fetchSourceStatusApi(notebookId: string, sourceId: string): Promise<SourceStatusResponse> {
+  const res = await apiClient.get<SourceStatusResponse>(`/notebooks/${notebookId}/sources/${sourceId}/status`)
   return res.data
 }
 

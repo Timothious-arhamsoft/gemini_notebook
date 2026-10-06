@@ -6,6 +6,7 @@
 -- Enable useful extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";   -- for fast text search later
+CREATE EXTENSION IF NOT EXISTS "vector";    -- pgvector for embedding storage
 
 -- ─── Users ─────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS users (
@@ -40,7 +41,7 @@ CREATE TABLE IF NOT EXISTS sources (
     raw_url         TEXT,          -- original URL if web source
     content_text    TEXT,          -- extracted plain text
     token_count     INTEGER,
-    status          VARCHAR(50) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'ready', 'error', 'failed')),
+    status          VARCHAR(50) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'analyzing', 'chunking', 'embedding', 'ready', 'completed', 'error', 'failed')),
     error_message   TEXT,
     analysis        JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),

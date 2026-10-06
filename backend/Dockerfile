@@ -9,7 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python deps first (layer caching)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+
+# Pre-download BGE embedding model into Docker layer for instant startup
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5')"
 
 # Copy source — overridden in dev by docker volume mount
 COPY . .

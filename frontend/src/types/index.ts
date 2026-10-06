@@ -62,7 +62,16 @@ export interface Source {
 }
 
 // ── Upload state (frontend-only) ─────────────────────────────
-export type UploadStatus = 'idle' | 'uploading' | 'processing' | 'ready' | 'error'
+export type UploadStatus =
+  | 'idle'
+  | 'uploading'
+  | 'processing'
+  | 'analyzing'
+  | 'chunking'
+  | 'embedding'
+  | 'ready'
+  | 'completed'
+  | 'error'
 
 export interface UploadFile {
   id: string           // local temp id
