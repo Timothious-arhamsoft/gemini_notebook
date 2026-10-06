@@ -1,4 +1,3 @@
-import React from 'react'
 import type { Citation, UploadFile } from '../../../../types'
 
 interface Props {

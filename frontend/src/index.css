@@ -21,6 +21,12 @@ img, svg { display: block; }
   --bg-hover:      #202025;
   --bg-active:     #26262c;
 
+  /* Notebook alias variables */
+  --bg-main:       var(--bg-base);
+  --fg-main:       var(--text-primary);
+  --bg-card:       var(--bg-surface);
+  --fg-muted:      var(--text-secondary);
+
   /* Borders */
   --border:        #28282f;
   --border-subtle: #1e1e24;
@@ -71,9 +77,33 @@ html {
   background-color: var(--bg-base);
 }
 
-/* In day-mode, html overscroll area matches the light page background */
+/* In day-mode, html and theme variables switch to light mode */
 html[data-theme='day'] {
   background-color: #f0f4ff;
+
+  --bg-base:       #f0f4ff;
+  --bg-surface:    #ffffff;
+  --bg-elevated:   #f8fafc;
+  --bg-hover:      #e2e8f0;
+  --bg-active:     #cbd5e1;
+
+  --border:        #cbd5e1;
+  --border-subtle: #e2e8f0;
+  --border-focus:  #6d6aff;
+
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-muted:     #64748b;
+  --text-disabled:  #94a3b8;
+
+  --bg-main:       #f0f4ff;
+  --fg-main:       #0f172a;
+  --bg-card:       #ffffff;
+  --fg-muted:      #475569;
+
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.08);
+  --shadow-md:  0 4px 16px rgba(0,0,0,0.1);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,0.12);
 }
 
 body {

@@ -40,6 +40,14 @@
   color: #0f172a;
   background: rgba(0, 0, 0, 0.05);
 }
+.home--day .home__nav-btn--primary {
+  color: #ffffff;
+  background: var(--accent);
+}
+.home--day .home__nav-btn--primary:hover {
+  color: #ffffff;
+  background: var(--accent-hover);
+}
 
 .home--day h1,
 .home--day .home__hero h1 {
