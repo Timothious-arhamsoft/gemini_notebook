@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { notebooksApi } from '../../api/notebooks'
 import { uploadSourceApi, fetchSourcesApi, deleteSourceApi } from '../../api/sources'
+import { fetchChatMessagesApi, sendChatMessageApi } from '../../api/chat'
 import { WorkspaceHeader } from './components/WorkspaceHeader/WorkspaceHeader'
 import { SourcesSidebar } from './components/SourcesSidebar/SourcesSidebar'
 import { StudioSidebar } from './components/StudioSidebar/StudioSidebar'
@@ -52,7 +53,7 @@ export function NotebookPage() {
     setLogs(prev => [`[${timestamp}] ${message}`, ...prev])
   }, [])
 
-  // 1. Fetch notebook & sources details
+  // 1. Fetch notebook, sources & chat history
   useEffect(() => {
     if (!id) return
     setLoading(true)
@@ -60,8 +61,9 @@ export function NotebookPage() {
     Promise.all([
       notebooksApi.get(id),
       fetchSourcesApi(id).catch(() => []),
+      fetchChatMessagesApi(id).catch(() => []),
     ])
-      .then(([data, existingSources]) => {
+      .then(([data, existingSources, existingChatMessages]) => {
         setNotebook(data)
         if (data.title && data.title !== UNTITLED) {
           userHasRenamedRef.current = true
@@ -74,11 +76,37 @@ export function NotebookPage() {
             file: new File([], s.title || 'document'),
             status: s.status === 'ready' ? 'ready' : s.status === 'error' || s.status === 'failed' ? 'error' : 'processing',
             progress: 100,
+            analysis: s.analysis ?? null,
+            content_text: s.content_text,
+            file_size: s.file_size ?? s.analysis?.total_characters ?? 0,
           }))
           setUploads(loadedUploads)
           addLog(`Loaded ${existingSources.length} existing document resources from database.`)
+
+          // Emit analysis activity log for restored documents if present
+          existingSources.forEach(s => {
+            if (s.analysis && !s.analysis.error) {
+              const chars = s.analysis.total_characters.toLocaleString()
+              const words = s.analysis.total_words.toLocaleString()
+              const chunkSize = s.analysis.recommended_chunk_size
+              const pageInfo = s.analysis.page_count ? `, Pages: ${s.analysis.page_count}` : ''
+              addLog(`[ANALYSIS] Restored ${s.title} — ${chars} chars, ${words} words${pageInfo}. Rec. chunk: ~${chunkSize} chars`)
+            }
+          })
         } else {
           addLog('Notebook initialized. No existing sources found.')
+        }
+
+        if (existingChatMessages.length > 0) {
+          const loadedMessages: ChatMessageType[] = existingChatMessages.map(m => ({
+            id: m.id,
+            notebook_id: m.notebook_id,
+            role: m.role as 'user' | 'assistant' | 'system',
+            content: m.content,
+            citations: m.citations ?? undefined,
+            created_at: m.created_at,
+          }))
+          setMessages(loadedMessages)
         }
       })
       .catch(err => {
@@ -259,51 +287,43 @@ export function NotebookPage() {
 
   // Handle sending chat message
   const handleSendMessage = async (text: string) => {
-    if (!text.trim() || sending || !id) return
+    const trimmed = text.trim()
+    if (!trimmed || sending || !id) return
 
-    const userMsg: ChatMessageType = {
+    const tempUserMsg: ChatMessageType = {
       id: Math.random().toString(36).substring(2, 9),
       notebook_id: id,
       role: 'user',
-      content: text,
+      content: trimmed,
       created_at: new Date().toISOString(),
     }
 
-    setMessages(prev => [...prev, userMsg])
+    setMessages(prev => [...prev, tempUserMsg])
     setSending(true)
-    addLog(`[USER QUERY] "${text}"`)
+    addLog(`[USER QUERY] "${trimmed}"`)
 
-    setTimeout(() => {
-      const readySources = uploads.filter(u => u.status === 'ready')
-      let aiContent = `Based on your uploaded sources, here is what I found regarding "${text}":\n\n`
+    try {
+      const savedMessages = await sendChatMessageApi(id, trimmed)
+      const formatted: ChatMessageType[] = savedMessages.map(m => ({
+        id: m.id,
+        notebook_id: m.notebook_id,
+        role: m.role as 'user' | 'assistant' | 'system',
+        content: m.content,
+        citations: m.citations ?? undefined,
+        created_at: m.created_at,
+      }))
 
-      if (readySources.length > 0) {
-        aiContent += `Key insights extracted from **${readySources[0].file.name}**:\n` +
-          `• The document content was successfully processed by the IngestionService.\n` +
-          `• Click the citation below to inspect the highlighted chunk extract in the right sidebar studio.`
-      } else {
-        aiContent += `No source documents are currently active. Upload PDF, TXT, or MD files in the left sidebar to get grounded answers with direct citations!`
-      }
-
-      const citationObj: Citation | undefined = readySources.length > 0 ? {
-        source_id: readySources[0].id,
-        source_title: readySources[0].file.name,
-        excerpt: `Direct extracted excerpt matching "${text}" from document ${readySources[0].file.name}.`,
-      } : undefined
-
-      const aiMsg: ChatMessageType = {
-        id: Math.random().toString(36).substring(2, 9),
-        notebook_id: id,
-        role: 'assistant',
-        content: aiContent,
-        citations: citationObj ? [citationObj] : undefined,
-        created_at: new Date().toISOString(),
-      }
-
-      setMessages(prev => [...prev, aiMsg])
+      setMessages(prev => {
+        const withoutTemp = prev.filter(m => m.id !== tempUserMsg.id)
+        return [...withoutTemp, ...formatted]
+      })
+      addLog(`[ASSISTANT ANSWER] Response saved to database.`)
+    } catch (err: any) {
+      console.error('Failed to send chat message:', err)
+      addLog(`[ERROR] Failed to save chat message: ${err?.response?.data?.detail || err.message}`)
+    } finally {
       setSending(false)
-      addLog(`[ASSISTANT ANSWER] Generated response with ${citationObj ? '1 citation' : '0 citations'}.`)
-    }, 1000)
+    }
   }
 
   if (loading) {

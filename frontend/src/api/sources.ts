@@ -39,6 +39,7 @@ export interface ApiSource {
   created_at: string
   updated_at: string
   analysis?: DocumentAnalysisResult | null
+  file_size?: number | null
 }
 
 export async function uploadSourceApi(notebookId: string, file: File): Promise<ApiSource> {
@@ -60,4 +61,8 @@ export async function fetchSourcesApi(notebookId: string): Promise<ApiSource[]> 
 
 export async function deleteSourceApi(notebookId: string, sourceId: string): Promise<void> {
   await apiClient.delete(`/notebooks/${notebookId}/sources/${sourceId}`)
+}
+
+export function getSourceFileUrl(notebookId: string, sourceId: string): string {
+  return `/api/v1/notebooks/${notebookId}/sources/${sourceId}/file`
 }

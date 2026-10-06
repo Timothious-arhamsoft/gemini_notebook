@@ -71,10 +71,12 @@ export interface UploadFile {
   progress: number
   error?: string
   analysis?: import('../api/sources').DocumentAnalysisResult | null
+  content_text?: string | null
+  file_size?: number | null
 }
 
 // ── Chat ─────────────────────────────────────────────────────
-export type MessageRole = 'user' | 'assistant'
+export type MessageRole = 'user' | 'assistant' | 'system'
 
 export interface Citation {
   source_id: string

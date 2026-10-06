@@ -15,6 +15,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -48,6 +49,7 @@ class SourceResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     analysis: Optional[Dict[str, Any]] = None
+    file_size: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -67,6 +69,17 @@ def _verify_notebook_access(
             status_code=status.HTTP_404_NOT_FOUND, detail="Notebook not found"
         )
     return nb
+
+
+def _build_source_response(source: Source) -> SourceResponse:
+    res = SourceResponse.model_validate(source)
+    res.analysis = source.analysis
+    if source.file_path and os.path.exists(source.file_path):
+        try:
+            res.file_size = os.path.getsize(source.file_path)
+        except Exception:
+            res.file_size = None
+    return res
 
 
 # ── Routes ────────────────────────────────────────────────────
@@ -143,6 +156,7 @@ def upload_source(
 
         source.content_text = extracted_text
         source.token_count = token_count
+        source.analysis = analysis_data
         source.status = "ready"
         db.commit()
         db.refresh(source)
@@ -169,9 +183,7 @@ def upload_source(
             detail=f"Internal ingestion error: {str(exc)}",
         )
 
-    response_obj = SourceResponse.model_validate(source)
-    response_obj.analysis = analysis_data
-    return response_obj
+    return _build_source_response(source)
 
 
 @router.get(
@@ -185,12 +197,13 @@ def list_sources(
 ):
     """List all sources associated with a notebook."""
     _verify_notebook_access(notebook_id, current_user, db)
-    return (
+    sources = (
         db.query(Source)
         .filter(Source.notebook_id == notebook_id)
         .order_by(Source.created_at.desc())
         .all()
     )
+    return [_build_source_response(s) for s in sources]
 
 
 @router.get(
@@ -214,7 +227,36 @@ def get_source(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Source not found"
         )
-    return source
+    return _build_source_response(source)
+
+
+@router.get(
+    "/{notebook_id}/sources/{source_id}/file",
+)
+def get_source_file(
+    notebook_id: uuid.UUID,
+    source_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Download/stream the raw document file for a source."""
+    _verify_notebook_access(notebook_id, current_user, db)
+    source = (
+        db.query(Source)
+        .filter(Source.id == source_id, Source.notebook_id == notebook_id)
+        .first()
+    )
+    if not source or not source.file_path or not os.path.exists(source.file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="File not found on disk"
+        )
+
+    media_type = "application/pdf" if source.source_type == "pdf" else "application/octet-stream"
+    return FileResponse(
+        path=source.file_path,
+        filename=source.title or "document",
+        media_type=media_type,
+    )
 
 
 @router.delete(

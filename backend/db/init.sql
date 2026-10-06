@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS sources (
     token_count     INTEGER,
     status          VARCHAR(50) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'ready', 'error', 'failed')),
     error_message   TEXT,
+    analysis        JSONB,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

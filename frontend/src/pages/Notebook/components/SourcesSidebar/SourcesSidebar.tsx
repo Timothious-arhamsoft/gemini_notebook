@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import { getFileTypeConfig, formatFileSize } from '../SourceUpload'
+import { apiClient } from '../../../../api/client'
 import type { UploadFile } from '../../../../types'
 
 interface Props {
@@ -19,6 +21,7 @@ export function SourcesSidebar({
   onSelectFile,
   activeTab,
 }: Props) {
+  const { id: notebookId } = useParams<{ id: string }>()
   const [internalPreviewFile, setInternalPreviewFile] = useState<UploadFile | null>(null)
   
   // Support both controlled or uncontrolled preview file state
@@ -43,28 +46,69 @@ export function SourcesSidebar({
       return
     }
 
-    const url = URL.createObjectURL(activeFile.file)
-    setObjectUrl(url)
-
+    const fileNameLower = activeFile.file.name.toLowerCase()
+    const isDocx = fileNameLower.endsWith('.docx') || fileNameLower.endsWith('.doc')
     const isText = activeFile.file.type.includes('text') || 
-                   activeFile.file.name.endsWith('.txt') || 
-                   activeFile.file.name.endsWith('.md')
+                   fileNameLower.endsWith('.txt') || 
+                   fileNameLower.endsWith('.md')
 
-    if (isText) {
-      activeFile.file.text().then(text => setTextContent(text)).catch(() => setTextContent(null))
+    // If docx or text file has extracted content_text, use it immediately
+    if ((isDocx || isText) && activeFile.content_text) {
+      setTextContent(activeFile.content_text)
+      setObjectUrl(null)
+      return
+    }
+
+    let createdBlobUrl: string | null = null
+
+    // 1. If file has local bytes (freshly uploaded in current session)
+    if (activeFile.file.size > 0) {
+      if (isText) {
+        activeFile.file.text().then(text => setTextContent(text)).catch(() => setTextContent(activeFile.content_text ?? null))
+      } else if (!isDocx) {
+        const url = URL.createObjectURL(activeFile.file)
+        createdBlobUrl = url
+        setObjectUrl(url)
+        setTextContent(activeFile.content_text ?? null)
+      } else {
+        setTextContent(activeFile.content_text ?? null)
+      }
+    } else if (notebookId && activeFile.id) {
+      // 2. Restored file after refresh — fetch PDF blob or use content_text
+      const isPdf = activeFile.file.type === 'application/pdf' || fileNameLower.endsWith('.pdf')
+
+      if (isPdf) {
+        apiClient.get(`/notebooks/${notebookId}/sources/${activeFile.id}/file`, { responseType: 'blob' })
+          .then(res => {
+            const blobUrl = URL.createObjectURL(res.data)
+            createdBlobUrl = blobUrl
+            setObjectUrl(blobUrl)
+          })
+          .catch(err => {
+            console.error('Failed to load document file blob:', err)
+            setObjectUrl(null)
+          })
+      } else {
+        setTextContent(activeFile.content_text ?? null)
+      }
     } else {
-      setTextContent(null)
+      setTextContent(activeFile.content_text ?? null)
     }
 
     return () => {
-      URL.revokeObjectURL(url)
+      if (createdBlobUrl) {
+        URL.revokeObjectURL(createdBlobUrl)
+      }
     }
-  }, [activeFile])
+  }, [activeFile, notebookId])
 
   // 1. INLINE PREVIEW MODE (When a file is selected)
   if (activeFile) {
     const config = getFileTypeConfig(activeFile.file.name)
-    const isPdf = activeFile.file.type === 'application/pdf' || activeFile.file.name.toLowerCase().endsWith('.pdf')
+    const fileNameLower = activeFile.file.name.toLowerCase()
+    const isPdf = activeFile.file.type === 'application/pdf' || fileNameLower.endsWith('.pdf')
+    const isDocx = fileNameLower.endsWith('.docx') || fileNameLower.endsWith('.doc')
+    const displayContent = textContent || activeFile.content_text
 
     return (
       <aside className={`sources-sidebar sources-sidebar--preview${activeTab === 'sources' ? ' sources-sidebar--active-tab' : ''}`}>
@@ -112,17 +156,17 @@ export function SourcesSidebar({
               title={activeFile.file.name}
               className="sidebar-preview__iframe"
             />
-          ) : textContent !== null ? (
-            <pre className="sidebar-preview__text">{textContent}</pre>
+          ) : isDocx || displayContent ? (
+            <pre className="sidebar-preview__text">
+              {displayContent || 'No extracted text available for this document.'}
+            </pre>
           ) : objectUrl ? (
-            <object data={objectUrl} type={activeFile.file.type} className="sidebar-preview__object">
-              <div className="sidebar-preview__fallback">
-                <p>Preview not available</p>
-                <a href={objectUrl} download={activeFile.file.name} className="sources-sidebar__add-btn">
-                  Download File
-                </a>
-              </div>
-            </object>
+            <div className="sidebar-preview__fallback">
+              <p>Preview not available directly for this file format.</p>
+              <a href={objectUrl} download={activeFile.file.name} className="sources-sidebar__add-btn">
+                Download File
+              </a>
+            </div>
           ) : (
             <div className="sidebar-preview__fallback">Loading preview…</div>
           )}
@@ -182,7 +226,7 @@ export function SourcesSidebar({
                     {item.file.name}
                   </span>
                   <span className="sources-sidebar__item-size">
-                    {formatFileSize(item.file.size)}
+                    {formatFileSize(item.file_size ?? item.file.size)}
                   </span>
                 </div>
 
