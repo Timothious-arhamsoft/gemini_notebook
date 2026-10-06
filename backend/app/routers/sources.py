@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, SessionLocal
 from app.models import Notebook, Source, User, Chunk
 from app.rag.pipeline import run_runtime_ingestion_pipeline
+from app.rag.retrieval import retrieve_chunks, RetrievedChunk
 from app.routers.auth import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,18 @@ class SourceStatusResponse(BaseModel):
     progress_label: str
     analysis: Optional[Dict[str, Any]] = None
     token_count: Optional[int] = None
+
+
+class RetrieveRequest(BaseModel):
+    query: str
+    top_k: int = 5
+
+
+class RetrieveResponse(BaseModel):
+    query: str
+    top_k: int
+    retrieved_chunks: List[RetrievedChunk]
+    count: int
 
 
 # ── Helpers ────────────────────────────────────────────────────
@@ -332,3 +345,34 @@ def delete_source(
 
     db.delete(source)
     db.commit()
+
+
+@router.post(
+    "/{notebook_id}/retrieve",
+    response_model=RetrieveResponse,
+)
+def dev_retrieve_chunks(
+    notebook_id: uuid.UUID,
+    payload: RetrieveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Development & testing endpoint — embeds query and retrieves top K chunks
+    using pgvector cosine similarity, scoped strictly to notebook_id.
+    """
+    _verify_notebook_access(notebook_id, current_user, db)
+
+    chunks = retrieve_chunks(
+        notebook_id=notebook_id,
+        query=payload.query,
+        db=db,
+        top_k=payload.top_k,
+    )
+
+    return RetrieveResponse(
+        query=payload.query,
+        top_k=payload.top_k,
+        retrieved_chunks=chunks,
+        count=len(chunks),
+    )

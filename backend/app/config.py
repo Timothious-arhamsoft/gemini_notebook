@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     # Gemini
     gemini_api_key: str = ""
 
+    # Groq LLM
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-120b"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

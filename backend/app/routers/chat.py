@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ChatMessage, Notebook, Source, User
+from app.rag.generation import run_rag_pipeline
 from app.routers.auth import get_current_user
 from app.routers.sources import _verify_notebook_access
 
@@ -111,41 +112,16 @@ def create_chat_message(
     )
     db.add(user_msg)
 
-    # 2. Get ready sources for grounded response
-    ready_sources = (
-        db.query(Source)
-        .filter(Source.notebook_id == notebook_id, Source.status == "ready")
-        .order_by(Source.created_at.desc())
-        .all()
+    # 2. Execute RAG pipeline: query -> BGE embedding -> pgvector retrieval -> context builder -> Groq LLM
+    rag_result = run_rag_pipeline(
+        notebook_id=notebook_id,
+        query=text,
+        db=db,
+        top_k=5,
     )
 
-    ai_content = f'Based on your uploaded sources, here is what I found regarding "{text}":\n\n'
-    citation_refs = None
-
-    if ready_sources:
-        primary_source = ready_sources[0]
-        ai_content += (
-            f"Key insights extracted from **{primary_source.title}**:\n"
-            f"• The document content was successfully processed by the IngestionService.\n"
-            f"• Click the citation below to inspect the highlighted chunk extract in the right sidebar studio."
-        )
-        excerpt = (
-            primary_source.content_text[:300] + "..."
-            if primary_source.content_text and len(primary_source.content_text) > 300
-            else (primary_source.content_text or f"Direct extracted excerpt matching '{text}'.")
-        )
-        citation_refs = [
-            {
-                "source_id": str(primary_source.id),
-                "source_title": primary_source.title or "Document",
-                "excerpt": excerpt,
-            }
-        ]
-    else:
-        ai_content += (
-            "No source documents are currently active. Upload PDF, TXT, or MD files in "
-            "the left sidebar to get grounded answers with direct citations!"
-        )
+    ai_content = rag_result.get("answer", "No response generated.")
+    citation_refs = rag_result.get("sources") or None
 
     # 3. Save assistant response
     assistant_msg = ChatMessage(

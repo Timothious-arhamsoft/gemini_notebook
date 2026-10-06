@@ -39,3 +39,4 @@ python-docx
 torch
 sentence-transformers
 langchain-text-splitters
+groq
