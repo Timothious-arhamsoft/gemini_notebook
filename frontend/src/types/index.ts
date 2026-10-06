@@ -70,6 +70,7 @@ export interface UploadFile {
   status: UploadStatus
   progress: number
   error?: string
+  analysis?: import('../api/sources').DocumentAnalysisResult | null
 }
 
 // ── Chat ─────────────────────────────────────────────────────

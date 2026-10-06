@@ -5,7 +5,7 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import (
     APIRouter,
@@ -47,6 +47,7 @@ class SourceResponse(BaseModel):
     error_message: Optional[str]
     created_at: datetime
     updated_at: datetime
+    analysis: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
@@ -128,6 +129,7 @@ def upload_source(
     db.commit()
     db.refresh(source)
 
+    analysis_data = None
     # Ingestion / Parsing Step
     try:
         parsed_result = ingestion_service.parse(
@@ -137,6 +139,7 @@ def upload_source(
 
         extracted_text = parsed_result.get("full_text", "")
         token_count = len(extracted_text.split()) if extracted_text else 0
+        analysis_data = parsed_result.get("analysis")
 
         source.content_text = extracted_text
         source.token_count = token_count
@@ -166,7 +169,9 @@ def upload_source(
             detail=f"Internal ingestion error: {str(exc)}",
         )
 
-    return source
+    response_obj = SourceResponse.model_validate(source)
+    response_obj.analysis = analysis_data
+    return response_obj
 
 
 @router.get(

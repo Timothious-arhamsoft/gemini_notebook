@@ -121,8 +121,40 @@ export function NotebookPage() {
   const handleAddFiles = useCallback((files: File[]) => {
     if (!id) return
 
+    // If this is the first upload and the notebook is still Untitled,
+    // use the first uploaded file's name as the notebook title.
+    const isFirstUpload =
+      uploads.length === 0 &&
+      notebook?.title === UNTITLED &&
+      !userHasRenamedRef.current
+
+    if (isFirstUpload && files.length > 0) {
+      const firstFile = files[0]
+
+      // Remove the file extension (.pdf, .txt, .md, etc.)
+      const newTitle = firstFile.name
+        .replace(/\.[^/.]+$/, '')
+        .trim()
+
+      if (newTitle) {
+        // Update the UI immediately
+        setNotebook(prev =>
+          prev ? { ...prev, title: newTitle } : prev
+        )
+
+        // Update browser tab title
+        document.title = `${newTitle} - NoteGenio`
+
+        // Persist the notebook title in the backend
+        notebooksApi.update(id, { title: newTitle }).catch(err => {
+          console.error('Failed to update notebook title:', err)
+        })
+      }
+    }
+
     files.forEach(file => {
       const tempId = Math.random().toString(36).substring(2, 9)
+
       const newUpload: UploadFile = {
         id: tempId,
         file,
@@ -135,21 +167,68 @@ export function NotebookPage() {
 
       uploadSourceApi(id, file)
         .then(apiSource => {
-          setUploads(prev => prev.map(u => u.id === tempId ? {
-            id: apiSource.id,
-            file,
-            status: apiSource.status === 'ready' ? 'ready' : 'error',
-            progress: 100,
-          } : u))
-          addLog(`[SUCCESS] IngestionService parsed ${file.name} (Status: ${apiSource.status}, Tokens: ${apiSource.token_count || 0})`)
+          const analysis = apiSource.analysis ?? null
+
+          setUploads(prev =>
+            prev.map(u =>
+              u.id === tempId
+                ? {
+                    id: apiSource.id,
+                    file,
+                    status: apiSource.status === 'ready' ? 'ready' : 'error',
+                    progress: 100,
+                    analysis,
+                  }
+                : u
+            )
+          )
+
+          addLog(
+            `[SUCCESS] IngestionService parsed ${file.name} ` +
+            `(Status: ${apiSource.status}, Tokens: ${apiSource.token_count || 0})`
+          )
+
+          // Emit analysis activity log
+          if (analysis && !analysis.error) {
+            const chars = analysis.total_characters.toLocaleString()
+            const words = analysis.total_words.toLocaleString()
+            const chunkSize = analysis.recommended_chunk_size
+            const pageInfo = analysis.page_count
+              ? `, Pages: ${analysis.page_count}`
+              : ''
+
+            addLog(
+              `[ANALYSIS] ${file.name} — ${chars} chars, ${words} words` +
+              `${pageInfo}. Recommended chunk size: ~${chunkSize} chars`
+            )
+          } else if (analysis?.error) {
+            addLog(
+              `[WARN] Document analysis failed for ${file.name}: ${analysis.error}`
+            )
+          }
         })
         .catch(err => {
           console.error(`Ingestion error for ${file.name}:`, err)
-          setUploads(prev => prev.map(u => u.id === tempId ? { ...u, status: 'error', error: err.message } : u))
-          addLog(`[ERROR] Document ingestion failed for ${file.name}: ${err.response?.data?.detail || err.message}`)
+
+          setUploads(prev =>
+            prev.map(u =>
+              u.id === tempId
+                ? {
+                    ...u,
+                    status: 'error',
+                    error: err.message,
+                  }
+                : u
+            )
+          )
+
+          addLog(
+            `[ERROR] Document ingestion failed for ${file.name}: ` +
+            `${err.response?.data?.detail || err.message}`
+          )
         })
     })
-  }, [id, addLog])
+  }, [id, addLog, uploads.length, notebook?.title])
 
   const handleRemoveFile = useCallback((fileId: string) => {
     if (id) {

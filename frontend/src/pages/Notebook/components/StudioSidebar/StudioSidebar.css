@@ -202,13 +202,19 @@
 
 .studio-sidebar__resource-item {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
+  flex-direction: column;
+  gap: 0.4rem;
   padding: 0.6rem 0.8rem;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-main);
+}
+
+.studio-sidebar__resource-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
 .studio-sidebar__resource-name {
@@ -275,6 +281,108 @@
   color: inherit;
   padding: 0.1rem 0.2rem;
   border-radius: 3px;
+}
+
+/* ── Analysis toggle ─────────────────────────────────────── */
+.studio-sidebar__analysis-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.studio-sidebar__analysis-toggle-label {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.studio-sidebar__analysis-toggle-label--error {
+  color: var(--st-error);
+}
+
+.studio-sidebar__analysis-peek {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Analysis panel ─────────────────────────────────────── */
+.studio-sidebar__analysis {
+  margin-top: 0.3rem;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-hover, rgba(0,0,0,0.03));
+  font-size: 0.8rem;
+}
+
+.studio-sidebar__analysis-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  row-gap: 0.3rem;
+  column-gap: 0.5rem;
+}
+
+.studio-sidebar__analysis-label {
+  color: var(--fg-muted);
+  font-size: 0.75rem;
+}
+
+.studio-sidebar__analysis-value {
+  color: var(--fg-main);
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.studio-sidebar__analysis-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.55rem 0;
+}
+
+.studio-sidebar__analysis-section-title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  margin-bottom: 0.4rem;
+}
+
+.studio-sidebar__analysis-recommendation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.studio-sidebar__analysis-strategy {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+}
+
+.studio-sidebar__analysis-chunk {
+  font-size: 0.8rem;
+  color: var(--fg-main);
+}
+
+.studio-sidebar__analysis-chunk strong {
+  color: var(--accent);
+}
+
+.studio-sidebar__analysis-error {
+  font-size: 0.78rem;
+  color: var(--st-error);
+  padding: 0.5rem 0;
 }
 
 /* ── Mobile: hide right sidebar ──────────────────────────── */

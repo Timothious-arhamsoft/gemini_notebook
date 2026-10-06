@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Type
 from uuid import UUID
 
+from app.rag.ingestion.analyzer import document_analyzer
 from app.rag.ingestion.base import (
     DocumentParser,
     DocumentParsingError,
@@ -59,14 +60,15 @@ class IngestionService:
 
     def parse(self, file_path: Path, document_id: UUID) -> Dict[str, Any]:
         """
-        Main entry point to parse a document using the appropriate registered parser.
+        Main entry point to parse a document using the appropriate registered parser
+        and calculate document analysis / chunk size recommendations.
 
         Args:
             file_path: Path to the uploaded document file.
             document_id: UUID identifier of the document.
 
         Returns:
-            Dict containing parsed structure, metadata, pages/sections, and extracted content.
+            Dict containing parsed structure, metadata, pages/sections, extracted content, and analysis.
         """
         file_path = Path(file_path)
         if not file_path.is_file():
@@ -81,6 +83,25 @@ class IngestionService:
 
         result = parser.parse(file_path=file_path, document_id=document_id)
         logger.info(f"Ingestion completed successfully for document {document_id}")
+
+        # Document Analysis & Chunk Size Recommendation step
+        try:
+            analysis = document_analyzer.analyze(result)
+            result["analysis"] = analysis
+            logger.info(
+                f"Document analysis completed for document {document_id}: "
+                f"Recommended chunk size {analysis.get('recommended_chunk_size')} ({analysis.get('recommended_strategy')})"
+            )
+        except Exception as analysis_err:
+            logger.error(f"Document analysis failed for {file_path.name}: {analysis_err}", exc_info=True)
+            result["analysis"] = {
+                "filename": file_path.name,
+                "file_type": ext.lstrip("."),
+                "error": f"Document analysis failed: {str(analysis_err)}",
+                "recommended_strategy": "recursive",
+                "recommended_chunk_size": 800,
+            }
+
         return result
 
 

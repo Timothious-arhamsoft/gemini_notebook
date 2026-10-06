@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Citation, UploadFile } from '../../../../types'
+import type { DocumentAnalysisResult } from '../../../../api/sources'
 
 interface Props {
   activeCitation: Citation | null
@@ -25,7 +26,7 @@ function parseLog(raw: string): Omit<Entry, 'count'> {
 
   let tone: Tone = 'info'
   if (/fail|error|could not|unable/i.test(message)) tone = 'error'
-  else if (/ready|loaded|uploaded|complete|success|indexed|saved/i.test(message)) tone = 'success'
+  else if (/ready|loaded|uploaded|complete|success|indexed|saved|analysis/i.test(message)) tone = 'success'
 
   return { time, message, tone }
 }
@@ -39,8 +40,88 @@ const STATUS_LABEL: Record<string, string> = {
 
 const HISTORY_LIMIT = 20
 
+function fmt(n: number | null | undefined): string {
+  if (n == null) return '—'
+  return n.toLocaleString()
+}
+
+function AnalysisPanel({ analysis }: { analysis: DocumentAnalysisResult }) {
+  if (analysis.error) {
+    return (
+      <div className="studio-sidebar__analysis-error">
+        ⚠ Analysis failed: {analysis.error}
+      </div>
+    )
+  }
+  return (
+    <div className="studio-sidebar__analysis">
+      <div className="studio-sidebar__analysis-grid">
+        <span className="studio-sidebar__analysis-label">Characters</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.total_characters)}</span>
+
+        <span className="studio-sidebar__analysis-label">Words</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.total_words)}</span>
+
+        {analysis.page_count != null && (
+          <>
+            <span className="studio-sidebar__analysis-label">Pages</span>
+            <span className="studio-sidebar__analysis-value">{fmt(analysis.page_count)}</span>
+          </>
+        )}
+
+        <span className="studio-sidebar__analysis-label">Paragraphs</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.paragraph_count)}</span>
+
+        {analysis.heading_count != null && (
+          <>
+            <span className="studio-sidebar__analysis-label">Headings</span>
+            <span className="studio-sidebar__analysis-value">{fmt(analysis.heading_count)}</span>
+          </>
+        )}
+
+        {analysis.section_count != null && (
+          <>
+            <span className="studio-sidebar__analysis-label">Sections</span>
+            <span className="studio-sidebar__analysis-value">{fmt(analysis.section_count)}</span>
+          </>
+        )}
+      </div>
+
+      <div className="studio-sidebar__analysis-divider" />
+
+      <div className="studio-sidebar__analysis-section-title">Paragraph distribution</div>
+      <div className="studio-sidebar__analysis-grid">
+        <span className="studio-sidebar__analysis-label">Median</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.median_paragraph_chars)}</span>
+
+        <span className="studio-sidebar__analysis-label">P75</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.p75_paragraph_chars)}</span>
+
+        <span className="studio-sidebar__analysis-label">P90</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.p90_paragraph_chars)}</span>
+
+        <span className="studio-sidebar__analysis-label">P95</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.p95_paragraph_chars)}</span>
+
+        <span className="studio-sidebar__analysis-label">Max</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.max_paragraph_chars)}</span>
+      </div>
+
+      <div className="studio-sidebar__analysis-divider" />
+
+      <div className="studio-sidebar__analysis-recommendation">
+        <span className="studio-sidebar__analysis-strategy">Strategy: {analysis.recommended_strategy}</span>
+        <span className="studio-sidebar__analysis-chunk">
+          Chunk size: <strong>~{fmt(analysis.recommended_chunk_size)} chars</strong>
+        </span>
+      </div>
+    </div>
+  )
+}
+
 export function StudioSidebar({ activeCitation, onClearCitation, uploads, logs }: Props) {
   const [showHistory, setShowHistory] = useState(false)
+  const [expandedDoc, setExpandedDoc] = useState<string | null>(null)
 
   // Parse logs and collapse consecutive duplicates (oldest -> newest)
   const entries = useMemo(() => {
@@ -163,17 +244,54 @@ export function StudioSidebar({ activeCitation, onClearCitation, uploads, logs }
             <p className="studio-sidebar__empty-text">No documents uploaded yet.</p>
           ) : (
             <ul className="studio-sidebar__resource-list">
-              {uploads.map((u) => (
-                <li key={u.id} className="studio-sidebar__resource-item">
-                  <span className="studio-sidebar__resource-name" title={u.file.name}>
-                    {u.file.name}
-                  </span>
-                  <span className={`studio-sidebar__status studio-sidebar__status--${u.status}`}>
-                    <span className="studio-sidebar__dot" aria-hidden="true" />
-                    {STATUS_LABEL[u.status] ?? u.status}
-                  </span>
-                </li>
-              ))}
+              {uploads.map((u) => {
+                const isExpanded = expandedDoc === u.id
+                const hasAnalysis = u.analysis && !u.analysis.error
+                const analysisFailed = u.analysis?.error
+
+                return (
+                  <li key={u.id} className="studio-sidebar__resource-item">
+                    <div className="studio-sidebar__resource-row">
+                      <span className="studio-sidebar__resource-name" title={u.file.name}>
+                        {u.file.name}
+                      </span>
+                      <span className={`studio-sidebar__status studio-sidebar__status--${u.status}`}>
+                        <span className="studio-sidebar__dot" aria-hidden="true" />
+                        {STATUS_LABEL[u.status] ?? u.status}
+                      </span>
+                    </div>
+
+                    {/* Show analysis toggle when analysis is available */}
+                    {u.analysis && (
+                      <button
+                        type="button"
+                        className="studio-sidebar__analysis-toggle"
+                        aria-expanded={isExpanded}
+                        onClick={() => setExpandedDoc(isExpanded ? null : u.id)}
+                      >
+                        {analysisFailed ? (
+                          <span className="studio-sidebar__analysis-toggle-label studio-sidebar__analysis-toggle-label--error">
+                            ⚠ Analysis error
+                          </span>
+                        ) : (
+                          <span className="studio-sidebar__analysis-toggle-label">
+                            📊 Analysis {isExpanded ? '▲' : '▼'}
+                          </span>
+                        )}
+                        {hasAnalysis && !isExpanded && (
+                          <span className="studio-sidebar__analysis-peek">
+                            ~{u.analysis!.recommended_chunk_size} chars
+                          </span>
+                        )}
+                      </button>
+                    )}
+
+                    {isExpanded && u.analysis && (
+                      <AnalysisPanel analysis={u.analysis} />
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </section>
