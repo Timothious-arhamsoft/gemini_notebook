@@ -202,11 +202,14 @@ def test_parse_v2_source_refs_dict():
 
 
 def test_historical_message_without_usage_does_not_crash():
+    from datetime import datetime, timezone
+
     msg = ChatMessage(
         id=uuid.uuid4(),
         notebook_id=uuid.uuid4(),
         role="assistant",
         content="Old answer [Source 1]",
+        created_at=datetime.now(timezone.utc),
         source_refs=[
             {
                 "source_id": str(uuid.uuid4()),
@@ -220,83 +223,3 @@ def test_historical_message_without_usage_does_not_crash():
     assert response.usage is None
     assert response.retrieved_evidence is None
 
-
-def test_source_inventory_query_detection():
-    from app.rag.query_router import classify_user_message, is_source_inventory_query
-
-    assert is_source_inventory_query("what source file or files you have")
-    assert is_source_inventory_query("What documents have I uploaded?")
-    assert is_source_inventory_query("How many documents are in this notebook?")
-    assert is_source_inventory_query("Which files are available?")
-    assert not is_source_inventory_query("  ")
-
-    # Normal RAG / content questions must NOT short-circuit
-    assert not is_source_inventory_query("What does the document say about cholera transmission?")
-    assert not is_source_inventory_query("What is cancer?")
-    assert classify_user_message("What is cancer?") == "rag"
-
-
-def test_conversational_query_detection():
-    from app.rag.query_router import classify_user_message, is_conversational_query
-
-    assert is_conversational_query("hello")
-    assert is_conversational_query("how are you?")
-    assert is_conversational_query("tell me about yourself")
-    assert is_conversational_query("tell me about you")
-    assert classify_user_message("hello") == "conversational"
-    assert classify_user_message("how are you?") == "conversational"
-    assert classify_user_message("tell me about you") == "conversational"
-
-    assert classify_user_message("what is cholera?") == "rag"
-    assert classify_user_message("summarize this document") == "rag"
-    assert not is_conversational_query("tell me about cholera")
-
-
-def test_source_inventory_pipeline_skips_retrieval():
-    """Source-list questions answer from Source metadata with no chunk citations."""
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from app.database import Base
-    from app.models import Notebook, Source, User
-    from app.rag.generation import run_rag_pipeline
-
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-
-    try:
-        nb_id = uuid.uuid4()
-        user = User(
-            id=uuid.uuid4(),
-            email="inv@test.com",
-            username="invuser",
-            hashed_password="pass",
-        )
-        nb = Notebook(id=nb_id, user_id=user.id, title="Cholera NB")
-        source = Source(
-            id=uuid.uuid4(),
-            notebook_id=nb_id,
-            source_type="pdf",
-            title="who_cholera.pdf",
-            status="completed",
-        )
-        session.add_all([user, nb, source])
-        session.commit()
-
-        result = run_rag_pipeline(
-            notebook_id=nb_id,
-            query="what source file or files you have",
-            db=session,
-            top_k=5,
-        )
-
-        assert "who_cholera.pdf" in result["answer"]
-        assert "1 source file" in result["answer"]
-        assert result["citations"] == []
-        assert result["retrieved_evidence"] == []
-        assert result["retrieved_chunks"] == []
-        assert result["usage"] is None
-    finally:
-        session.close()

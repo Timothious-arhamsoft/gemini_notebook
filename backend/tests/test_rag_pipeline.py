@@ -33,12 +33,24 @@ def test_5_embedding_dimension():
     assert isinstance(embeddings[0][0], float)
 
 
-def test_4_empty_notebook(db_session):
+def test_4_empty_notebook(db_session, monkeypatch):
     """Test 4: Querying a notebook with no uploaded sources/chunks returns clean empty list."""
     empty_nb_id = uuid.uuid4()
     chunks = retrieve_chunks(notebook_id=empty_nb_id, query="What is asthma?", db=db_session, top_k=5)
     assert chunks == []
 
+    def fake_generate(query, **kwargs):
+        # No retrieved docs → unified path still calls the LLM; model should refuse document facts.
+        assert not kwargs.get("document_context")
+        return (
+            "I couldn't find enough information about that in the uploaded sources.",
+            {"model": "openai/gpt-oss-120b"},
+        )
+
+    monkeypatch.setattr(
+        "app.rag.generation.groq_service.generate_answer",
+        fake_generate,
+    )
     result = run_rag_pipeline(notebook_id=empty_nb_id, query="What is asthma?", db=db_session, top_k=5)
     assert result["sources"] == []
     assert result["retrieved_chunks"] == []

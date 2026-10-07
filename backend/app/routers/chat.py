@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ChatMessage, User
-from app.rag.generation import run_rag_pipeline
+from app.rag.generation import load_conversation_history, run_rag_pipeline
 from app.routers.auth import get_current_user
 from app.routers.sources import _verify_notebook_access
 
@@ -198,6 +198,10 @@ def create_chat_message(
             detail="Message content cannot be empty.",
         )
 
+    # Load prior turns before inserting the new user message so history
+    # excludes the current question (and avoids autoflush including it).
+    conversation_history = load_conversation_history(notebook_id, db)
+
     # 1. Save user message
     user_msg = ChatMessage(
         id=uuid.uuid4(),
@@ -207,12 +211,13 @@ def create_chat_message(
     )
     db.add(user_msg)
 
-    # 2. Execute RAG pipeline: query -> BGE embedding -> pgvector retrieval -> context builder -> Groq LLM
+    # 2. Unified pipeline: history + inventory + retrieval → one Groq call
     rag_result = run_rag_pipeline(
         notebook_id=notebook_id,
         query=text,
         db=db,
         top_k=5,
+        conversation_history=conversation_history,
     )
 
     ai_content = rag_result.get("answer", "No response generated.")

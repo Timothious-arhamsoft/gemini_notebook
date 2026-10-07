@@ -1,28 +1,22 @@
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
-from app.models import Source
+from app.models import ChatMessage, Source
 from app.rag.citations import select_answer_citations
 from app.rag.context import build_context
+from app.rag.embedder import DEFAULT_MODEL_NAME
 from app.rag.llm import groq_service
-from app.rag.query_router import classify_user_message
 from app.rag.retrieval import RetrievedChunk, retrieve_chunks
 
 logger = logging.getLogger(__name__)
 
-
-def _format_source_inventory_answer(titles: List[str]) -> str:
-    if not titles:
-        return (
-            "You currently have no source files uploaded in this notebook."
-        )
-    n = len(titles)
-    noun = "source file" if n == 1 else "source files"
-    lines = "\n".join(f"- {title}" for title in titles)
-    return f"You currently have {n} {noun}:\n\n{lines}"
+# How many prior chat turns (user+assistant messages) to send to the LLM.
+_MAX_HISTORY_MESSAGES = 12
+# How many prior user turns to fold into the retrieval embedding query.
+_MAX_RETRIEVAL_USER_TURNS = 2
 
 
 def _list_notebook_source_titles(notebook_id: uuid.UUID, db: Session) -> List[str]:
@@ -37,6 +31,76 @@ def _list_notebook_source_titles(notebook_id: uuid.UUID, db: Session) -> List[st
         title = (source.title or "").strip() or "Untitled source"
         titles.append(title)
     return titles
+
+
+def format_source_inventory(titles: Sequence[str]) -> str:
+    """Compact inventory text injected into the unified system prompt."""
+    if not titles:
+        return "No source files are currently uploaded in this notebook."
+    n = len(titles)
+    noun = "source file" if n == 1 else "source files"
+    lines = "\n".join(f"- {title}" for title in titles)
+    return f"The notebook currently has {n} {noun}:\n{lines}"
+
+
+def load_conversation_history(
+    notebook_id: uuid.UUID,
+    db: Session,
+    *,
+    limit: int = _MAX_HISTORY_MESSAGES,
+) -> List[Dict[str, str]]:
+    """
+    Load recent prior chat turns for the notebook.
+
+    Expects the current user message to not be visible yet (caller should load
+    history before inserting the new user row, or pass exclude_message_id).
+    """
+    if limit <= 0:
+        return []
+
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.notebook_id == notebook_id)
+        .filter(ChatMessage.role.in_(("user", "assistant")))
+        .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
+        .all()
+    )
+    if len(rows) > limit:
+        rows = rows[-limit:]
+    history: List[Dict[str, str]] = []
+    for row in rows:
+        content = (row.content or "").strip()
+        if not content:
+            continue
+        history.append({"role": row.role, "content": content})
+    return history
+
+
+def build_retrieval_query(
+    current_query: str,
+    conversation_history: Sequence[Dict[str, str]],
+    *,
+    max_prior_user_turns: int = _MAX_RETRIEVAL_USER_TURNS,
+) -> str:
+    """
+    Build a conversation-aware retrieval query without an extra LLM rewrite call.
+
+    Follow-ups like "What about prevention?" after a malaria question become
+    more useful when prior user turns are included in the embedding text.
+    """
+    current = " ".join((current_query or "").split()).strip()
+    if not current:
+        return ""
+
+    prior_user = [
+        " ".join((turn.get("content") or "").split()).strip()
+        for turn in conversation_history
+        if turn.get("role") == "user"
+    ]
+    prior_user = [text for text in prior_user if text][-max_prior_user_turns:]
+    if not prior_user:
+        return current
+    return " ".join([*prior_user, current])
 
 
 def _empty_rag_result(answer: str, usage: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -55,65 +119,72 @@ def run_rag_pipeline(
     query: str,
     db: Session,
     top_k: int = 5,
+    conversation_history: Optional[Sequence[Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """
-    Executes chat routing then either:
-    - conversational reply (no retrieval),
-    - source inventory from Source metadata (no retrieval), or
-    - full RAG: retrieve → context → grounded Groq → citations.
+    Unified chat path:
+    conversation history + source inventory + (optional) retrieved chunks
+    → one Groq request with a unified system prompt → answer.
+
+    The LLM decides whether retrieved chunks, inventory, product knowledge,
+    or conversation history are relevant. No regex intent router.
     """
-    route = classify_user_message(query)
-
-    if route == "source_inventory":
-        titles = _list_notebook_source_titles(notebook_id, db)
-        answer = _format_source_inventory_answer(titles)
-        logger.info(
-            "[RAG Pipeline] Source-inventory query for notebook %s (%s files) — skipping retrieval",
-            notebook_id,
-            len(titles),
-        )
-        return _empty_rag_result(answer)
-
-    if route == "conversational":
-        logger.info(
-            "[RAG Pipeline] Conversational query for notebook %s — skipping retrieval",
-            notebook_id,
-        )
-        usage = None
-        try:
-            answer, usage = groq_service.generate_conversational_answer(query=query)
-        except Exception as exc:
-            logger.error(f"[RAG Pipeline] Conversational LLM failed: {exc}")
-            answer = "Hello! I'm the NoteGenio assistant. Ask me anything about your uploaded documents."
-        return _empty_rag_result(answer, usage)
-
-    logger.info(f"[RAG Pipeline] Step 1: Retrieving top_{top_k} chunks for query in notebook {notebook_id}")
-    chunks: List[RetrievedChunk] = retrieve_chunks(
-        notebook_id=notebook_id,
-        query=query,
-        db=db,
-        top_k=top_k,
+    history = list(conversation_history) if conversation_history is not None else load_conversation_history(
+        notebook_id, db
     )
 
-    if not chunks:
-        logger.info(f"[RAG Pipeline] No chunks found for notebook {notebook_id}")
-        return _empty_rag_result(
-            "I couldn't find enough information about that in the uploaded sources."
+    titles = _list_notebook_source_titles(notebook_id, db)
+    inventory_text = format_source_inventory(titles)
+
+    retrieval_query = build_retrieval_query(query, history)
+    logger.info(
+        "[RAG Pipeline] Retrieving top_%s chunks for notebook %s (retrieval_query=%r)",
+        top_k,
+        notebook_id,
+        retrieval_query[:120],
+    )
+
+    chunks: List[RetrievedChunk] = []
+    if retrieval_query:
+        chunks = retrieve_chunks(
+            notebook_id=notebook_id,
+            query=retrieval_query,
+            db=db,
+            top_k=top_k,
         )
 
-    logger.info(f"[RAG Pipeline] Step 2: Building prompt context from {len(chunks)} chunks")
-    context_str, evidence_refs = build_context(chunks)
+    context_str = ""
+    evidence_refs: List[Dict[str, Any]] = []
+    if chunks:
+        context_str, evidence_refs = build_context(chunks)
 
-    logger.info("[RAG Pipeline] Step 3: Invoking Groq LLM for grounded answer generation")
+    logger.info(
+        "[RAG Pipeline] Invoking unified Groq generation (history=%s, sources=%s, chunks=%s)",
+        len(history),
+        len(titles),
+        len(chunks),
+    )
+
     usage = None
     try:
-        answer, usage = groq_service.generate_grounded_answer(
-            query=query,
-            context_str=context_str,
+        answer, usage = groq_service.generate_answer(
+            query,
+            document_context=context_str or None,
+            conversation_history=history,
+            source_inventory=inventory_text,
+            embedding_model=DEFAULT_MODEL_NAME,
         )
     except Exception as exc:
         logger.error(f"[RAG Pipeline] Groq LLM generation failed: {exc}")
-        answer = f"Error generating LLM response: {str(exc)}"
+        # Document-shaped fallback only when we had retrieval context but the LLM failed.
+        if context_str:
+            answer = f"Error generating LLM response: {str(exc)}"
+        else:
+            answer = (
+                "Hello! I'm the NoteGenio assistant. Ask me anything about your "
+                "uploaded documents, or ask what I can do."
+            )
+            return _empty_rag_result(answer, usage)
 
     citations = select_answer_citations(answer, evidence_refs)
 

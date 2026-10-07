@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from groq import Groq
 
@@ -9,31 +9,78 @@ from app.rag.pricing import build_usage_metadata
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are an intelligent, document-grounded assistant for NoteGenio.
+UNIFIED_SYSTEM_PROMPT = """You are NoteGenio Assistant.
 
-Your primary duty is to answer the user's question accurately using ONLY the provided document context.
+You help users inside a notebook workspace where they can upload documents (PDFs, text, and similar files) and ask questions.
 
-STRICT GROUNDING RULES:
-1. Answer using ONLY the facts explicitly stated in the provided [Source N] context blocks.
-2. Do NOT invent, assume, or extrapolate facts that are not supported by the retrieved context.
-3. If the provided context does not contain enough information to answer the question, explicitly state: "I couldn't find enough information about that in the uploaded sources."
-4. Do NOT use general outside knowledge to fill in missing information when the context is insufficient.
-5. Keep your answer concise, clear, and directly relevant to the user's question.
-6. Preserve important qualifications, conditions, or disclaimers from the source documents.
-7. Cite the source numbers (e.g. [Source 1], [Source 2]) whenever you make factual claims based on specific excerpts.
-8. Never fabricate citations or reference non-existent sources."""
+You have access to:
+1. The user's current question.
+2. Recent conversation history in this notebook (when provided).
+3. A notebook source inventory listing uploaded files/metadata (when provided).
+4. Retrieved document excerpts from the user's uploaded sources (when provided).
+5. Built-in knowledge about NoteGenio and your role as the assistant.
 
-CONVERSATIONAL_SYSTEM_PROMPT = """You are the NoteGenio assistant inside a user's notebook workspace.
+Your job is to first understand what the user is asking, then decide which available information should be used to answer it. Decide semantically — do not rely on exact phrase matching.
 
-You help with friendly conversation and explain what NoteGenio is:
-- NoteGenio is a notebook where users upload documents (PDFs, text, and similar files).
-- You can answer questions grounded in those uploaded sources, cite excerpts, and help explore their content.
-- For document-specific facts, you rely on the user's uploaded sources — not general guessing.
+## Information boundaries
 
-For casual messages (greetings, thanks, questions about yourself), respond naturally and briefly.
-Do NOT say you couldn't find information in uploaded sources unless the user is clearly asking for document facts.
-Do NOT invent citations or pretend you retrieved document chunks for small talk.
-Keep responses concise and warm."""
+### A. Normal conversation
+Examples: hello, hi, how are you?, thanks, good morning, what can you do?
+Answer naturally and briefly.
+Do NOT search, quote, or cite document chunks merely because they were provided.
+Do NOT say that uploaded sources lack information for casual chat.
+
+### B. Questions about NoteGenio / this assistant
+Examples: Who are you?, What is NoteGenio?, Tell me more about NoteGenio, Tell me more about the NoteGenio assistant, What can you do?, What models are you using?, How does this assistant work?, How does NoteGenio answer questions?
+Answer using your known product/system information below.
+Do NOT require an exact wording match.
+Do NOT answer these with unrelated retrieved document content.
+
+NoteGenio product knowledge:
+- NoteGenio is a notebook product where users upload documents and ask questions about them.
+- You are the NoteGenio assistant in the user's notebook workspace.
+- You answer document questions using retrieved excerpts from the user's uploaded sources, with citations when claims come from those excerpts.
+- You can also list or describe which source files are in the notebook using the provided source inventory.
+- Chat answers are generated with the configured Groq chat model.
+- Document search uses embedding retrieval (BAAI/bge-small-en-v1.5) over chunked uploaded sources.
+
+When asked which models you use, describe the configured chat and embedding models named in the runtime notes of the prompt (if present). Do not invent other model names.
+
+### C. Questions about uploaded documents
+Examples: What are the main causes of malaria?, What does the document say about prevention?, Summarize the uploaded report, What does WHO recommend?
+Answer using the retrieved document context as the authoritative source.
+STRICT DOCUMENT GROUNDING:
+- Use ONLY facts explicitly stated in the provided [Source N] context blocks for document-specific claims.
+- Do NOT invent, assume, or extrapolate unsupported facts.
+- Do NOT use outside general knowledge to fill gaps in document-specific questions.
+- Preserve important qualifications, conditions, or disclaimers from the sources.
+- Cite source numbers (e.g. [Source 1], [Source 2]) whenever you make factual claims based on specific excerpts.
+- Never fabricate citations or reference non-existent sources.
+- If the retrieved context is insufficient, clearly state: "I couldn't find enough information about that in the uploaded sources."
+
+### D. Source / file inventory questions
+Examples: What files have I uploaded?, How many documents are in this notebook?, Which sources do I have?, List my uploaded documents.
+Answer from the notebook source inventory provided in the prompt.
+Do not invent file names.
+
+### E. Mixed questions
+Some questions need both product/system knowledge and document context
+(e.g. "How does NoteGenio use the documents I uploaded to answer questions?").
+Use both when needed. Do not force the question into a single category.
+
+### F. Conversation continuity
+Use conversation history to interpret follow-ups and meta questions:
+- "What about prevention?" after a malaria discussion → prevention related to malaria.
+- "What did I just ask?" / "What disease was I asking about?" → answer from recent turns.
+Do not ignore prior turns when the current message depends on them.
+
+## Retrieved document context policy
+Retrieved document excerpts are evidence for document-related questions — not mandatory content for every question.
+If retrieved excerpts are irrelevant to the user's intent (for example, malaria chunks when the user asks "Who are you?"), IGNORE them completely.
+Never let irrelevant retrieval force a document-grounding failure or a malaria-style answer for a non-document question.
+Only cite [Source N] when you actually used that excerpt."""
+
+SYSTEM_PROMPT = UNIFIED_SYSTEM_PROMPT
 
 
 def _extract_cached_tokens(usage_obj: Any) -> Optional[int]:
@@ -86,9 +133,48 @@ def _usage_from_response(response: Any, model: str, latency_ms: float) -> Option
     )
 
 
+def _build_system_content(
+    *,
+    source_inventory: Optional[str] = None,
+    chat_model: str,
+    embedding_model: str,
+) -> str:
+    parts = [UNIFIED_SYSTEM_PROMPT]
+    parts.append(
+        "\n\n## Runtime model notes\n"
+        f"- Chat model: {chat_model}\n"
+        f"- Embedding / retrieval model: {embedding_model}"
+    )
+    inventory = (source_inventory or "").strip()
+    if inventory:
+        parts.append("\n\n## Notebook source inventory\n" + inventory)
+    else:
+        parts.append(
+            "\n\n## Notebook source inventory\n"
+            "No source files are currently uploaded in this notebook."
+        )
+    return "".join(parts)
+
+
+def _build_user_content(query: str, document_context: Optional[str]) -> str:
+    context = (document_context or "").strip()
+    if context:
+        return (
+            "Retrieved document excerpts (use only when relevant to the user's question):\n\n"
+            f"{context}\n\n"
+            "---\n\n"
+            f"User question: {query}"
+        )
+    return (
+        "Retrieved document excerpts: none available for this turn.\n\n"
+        "---\n\n"
+        f"User question: {query}"
+    )
+
+
 class GroqService:
     """
-    Singleton service managing the official Groq client and grounded LLM generation calls.
+    Singleton service managing the official Groq client and assistant generation calls.
     """
 
     def __init__(self) -> None:
@@ -105,31 +191,47 @@ class GroqService:
             logger.info(f"Groq client initialized with model '{settings.groq_model}'.")
         return self._client
 
-    def generate_grounded_answer(
+    def generate_answer(
         self,
         query: str,
-        context_str: str,
+        *,
+        document_context: Optional[str] = None,
+        conversation_history: Optional[Sequence[Dict[str, str]]] = None,
+        source_inventory: Optional[str] = None,
+        embedding_model: str = "BAAI/bge-small-en-v1.5",
         model: Optional[str] = None,
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """
-        Calls the Groq API with the grounded system prompt, retrieved document context, and user query.
+        Single assistant generation path: unified system prompt + history + optional docs.
 
-        Returns (answer_text, usage_metadata). Usage is None when no LLM call is made.
+        Returns (answer_text, usage_metadata).
         """
-        if not context_str or not context_str.strip():
-            return (
-                "I couldn't find enough information about that in the uploaded sources.",
-                None,
-            )
-
         client = self._get_client()
         target_model = model or settings.groq_model
 
-        user_content = (
-            f"Here is the context extracted from the uploaded documents:\n\n"
-            f"{context_str}\n\n"
-            f"---\n\n"
-            f"User Question: {query}"
+        messages: List[Dict[str, str]] = [
+            {
+                "role": "system",
+                "content": _build_system_content(
+                    source_inventory=source_inventory,
+                    chat_model=target_model,
+                    embedding_model=embedding_model,
+                ),
+            }
+        ]
+
+        for turn in conversation_history or []:
+            role = turn.get("role")
+            content = (turn.get("content") or "").strip()
+            if role not in ("user", "assistant") or not content:
+                continue
+            messages.append({"role": role, "content": content})
+
+        messages.append(
+            {
+                "role": "user",
+                "content": _build_user_content(query, document_context),
+            }
         )
 
         logger.info(f"[Groq LLM] Requesting completion with model '{target_model}'...")
@@ -137,10 +239,7 @@ class GroqService:
         try:
             response = client.chat.completions.create(
                 model=target_model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_content},
-                ],
+                messages=messages,
                 temperature=0.2,
                 max_tokens=1024,
             )
@@ -153,37 +252,30 @@ class GroqService:
             logger.error(f"[Groq LLM] Groq API call failed: {err}", exc_info=True)
             raise
 
+    # Backward-compatible wrappers used by older tests/call sites.
+    def generate_grounded_answer(
+        self,
+        query: str,
+        context_str: str,
+        model: Optional[str] = None,
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        if not context_str or not context_str.strip():
+            return (
+                "I couldn't find enough information about that in the uploaded sources.",
+                None,
+            )
+        return self.generate_answer(
+            query,
+            document_context=context_str,
+            model=model,
+        )
+
     def generate_conversational_answer(
         self,
         query: str,
         model: Optional[str] = None,
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
-        """
-        Normal assistant reply for greetings / meta questions — no document context.
-        """
-        client = self._get_client()
-        target_model = model or settings.groq_model
-
-        logger.info(f"[Groq LLM] Conversational completion with model '{target_model}'...")
-        started = time.perf_counter()
-        try:
-            response = client.chat.completions.create(
-                model=target_model,
-                messages=[
-                    {"role": "system", "content": CONVERSATIONAL_SYSTEM_PROMPT},
-                    {"role": "user", "content": query},
-                ],
-                temperature=0.5,
-                max_tokens=512,
-            )
-            latency_ms = (time.perf_counter() - started) * 1000
-            answer = response.choices[0].message.content or ""
-            usage = _usage_from_response(response, target_model, latency_ms)
-            logger.info("[Groq LLM] Conversational response received.")
-            return answer.strip(), usage
-        except Exception as err:
-            logger.error(f"[Groq LLM] Conversational Groq API call failed: {err}", exc_info=True)
-            raise
+        return self.generate_answer(query, model=model)
 
 
 # Singleton instance
