@@ -54,6 +54,16 @@ def test_extract_cited_indices_order_and_repeats():
     assert extract_cited_indices(answer) == [2, 1]
 
 
+def test_extract_cited_indices_cjk_and_fullwidth_brackets():
+    # Narrow no-break space (U+202F) between Source and digit, as models often emit
+    answer = (
+        "Malaria is caused by Plasmodium【Source\u202f1】. "
+        "Also reported in SE Asia【Source 1】【Source 4】. "
+        "Fullwidth［Source 2］."
+    )
+    assert extract_cited_indices(answer) == [1, 4, 2]
+
+
 def test_select_answer_citations_maps_to_stable_refs():
     evidence = _sample_evidence()
     answer = "Preventer inhalers help. [Source 2] Relievers also help. [Source 2]"
@@ -64,6 +74,16 @@ def test_select_answer_citations_maps_to_stable_refs():
     assert citations[0]["source_title"] == "asthma_patient_information.pdf"
     assert citations[0]["chunk_index"] == 7
     assert citations[0]["page"] == 2
+
+
+def test_select_answer_citations_from_cjk_markers():
+    evidence = _sample_evidence()
+    answer = "Preventer inhalers help.【Source 1】 Relievers also help.【Source 2】"
+    citations = select_answer_citations(answer, evidence)
+
+    assert [c["citation_index"] for c in citations] == [1, 2]
+    assert citations[0]["source_title"] == "asthma-disease-flyer.pdf"
+    assert citations[1]["source_title"] == "asthma_patient_information.pdf"
 
 
 def test_invalid_citation_index_is_ignored():

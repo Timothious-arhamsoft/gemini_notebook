@@ -1,6 +1,8 @@
 import type { Citation } from '../types'
 
 const SOURCE_CITATION_RE = /\[Source\s+(\d+)\]/gi
+/** Models sometimes emit CJK / fullwidth brackets instead of ASCII [Source N]. */
+const ALT_SOURCE_CITATION_RE = /[【［]\s*Source\s+(\d+)\s*[】］]/gi
 
 /** Matches HTML/SVG-like tags that occasionally leak from PDF text / model output. */
 const HTML_LIKE_TAG_RE = /<\/?[a-zA-Z][a-zA-Z0-9:-]*(?:\s[^<>]*)?>/g
@@ -10,6 +12,12 @@ export const INSUFFICIENT_ANSWER_PHRASE =
 
 export function isInsufficientAnswer(content: string): boolean {
   return content.toLowerCase().includes(INSUFFICIENT_ANSWER_PHRASE)
+}
+
+/** Rewrite alternate citation wrappers to canonical [Source N]. */
+export function normalizeCitationMarkers(text: string): string {
+  if (!text) return text
+  return text.replace(ALT_SOURCE_CITATION_RE, (_match, index: string) => `[Source ${index}]`)
 }
 
 /**
@@ -24,6 +32,7 @@ export function normalizeAssistantMarkdown(raw: string): string {
   text = text.replace(HTML_LIKE_TAG_RE, '')
   // Collapse runs of blank lines left after tag removal.
   text = text.replace(/\n{3,}/g, '\n\n').trim()
+  text = normalizeCitationMarkers(text)
   return text
 }
 

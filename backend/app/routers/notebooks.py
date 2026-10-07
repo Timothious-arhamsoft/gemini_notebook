@@ -1,5 +1,8 @@
+import logging
+import shutil
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -9,8 +12,12 @@ from app.database import get_db
 from app.models import Notebook, User
 from app.routers.auth import get_current_user
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Same base as sources router — DB rows and files are separate concerns
+STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "storage"
 
 
 # ── Schemas ────────────────────────────────────────────────────
@@ -143,7 +150,7 @@ def delete_notebook(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete a notebook only if it belongs to the authenticated user."""
+    """Delete notebook DB rows (cascade), then remove storage/notebooks/<id>/."""
     nb = (
         db.query(Notebook)
         .filter(
@@ -159,5 +166,16 @@ def delete_notebook(
             detail="Notebook not found",
         )
 
+    # 1) DB relationships (sources → chunks, chat messages, notebook)
     db.delete(nb)
     db.commit()
+
+    # 2) Physical storage — separate from DB; cascade does not touch disk
+    nb_storage_dir = STORAGE_DIR / "notebooks" / str(notebook_id)
+    if nb_storage_dir.is_dir():
+        try:
+            shutil.rmtree(nb_storage_dir)
+        except Exception as e:
+            logger.warning(
+                "Could not remove notebook storage %s: %s", nb_storage_dir, e
+            )
