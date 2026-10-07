@@ -28,7 +28,7 @@ export function ChatMessage({ message, activeCitationKey, onCitationClick }: Pro
         {isUser ? (
           'U'
         ) : (
-          <svg width="14" height="14" viewBox="0 0 28 28" fill="none">
+          <svg width="14" height="14" viewBox="0 0 28 28" fill="none" aria-hidden="true">
             <rect width="28" height="28" rx="4" fill="var(--accent)" opacity="0.8" />
             <path d="M7 7h8a6 6 0 0 1 0 12H7V7Z" fill="white" opacity="0.9" />
           </svg>
@@ -76,8 +76,12 @@ export function ChatMessage({ message, activeCitationKey, onCitationClick }: Pro
                       onClick={() => onCitationClick?.(c)}
                     >
                       <span className="chat-msg__citation-num">[{num}]</span>
-                      <span className="chat-msg__citation-title">{c.source_title}</span>
-                      {meta && <span className="chat-msg__citation-meta">{meta}</span>}
+                      <span className="chat-msg__citation-body">
+                        <span className="chat-msg__citation-title">{c.source_title}</span>
+                        {meta ? (
+                          <span className="chat-msg__citation-meta"> · {meta}</span>
+                        ) : null}
+                      </span>
                     </button>
                   </li>
                 )

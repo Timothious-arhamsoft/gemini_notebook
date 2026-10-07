@@ -23,6 +23,18 @@ STRICT GROUNDING RULES:
 7. Cite the source numbers (e.g. [Source 1], [Source 2]) whenever you make factual claims based on specific excerpts.
 8. Never fabricate citations or reference non-existent sources."""
 
+CONVERSATIONAL_SYSTEM_PROMPT = """You are the NoteGenio assistant inside a user's notebook workspace.
+
+You help with friendly conversation and explain what NoteGenio is:
+- NoteGenio is a notebook where users upload documents (PDFs, text, and similar files).
+- You can answer questions grounded in those uploaded sources, cite excerpts, and help explore their content.
+- For document-specific facts, you rely on the user's uploaded sources — not general guessing.
+
+For casual messages (greetings, thanks, questions about yourself), respond naturally and briefly.
+Do NOT say you couldn't find information in uploaded sources unless the user is clearly asking for document facts.
+Do NOT invent citations or pretend you retrieved document chunks for small talk.
+Keep responses concise and warm."""
+
 
 def _extract_cached_tokens(usage_obj: Any) -> Optional[int]:
     """Read cached token count from Groq usage when present."""
@@ -139,6 +151,38 @@ class GroqService:
             return answer.strip(), usage
         except Exception as err:
             logger.error(f"[Groq LLM] Groq API call failed: {err}", exc_info=True)
+            raise
+
+    def generate_conversational_answer(
+        self,
+        query: str,
+        model: Optional[str] = None,
+    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """
+        Normal assistant reply for greetings / meta questions — no document context.
+        """
+        client = self._get_client()
+        target_model = model or settings.groq_model
+
+        logger.info(f"[Groq LLM] Conversational completion with model '{target_model}'...")
+        started = time.perf_counter()
+        try:
+            response = client.chat.completions.create(
+                model=target_model,
+                messages=[
+                    {"role": "system", "content": CONVERSATIONAL_SYSTEM_PROMPT},
+                    {"role": "user", "content": query},
+                ],
+                temperature=0.5,
+                max_tokens=512,
+            )
+            latency_ms = (time.perf_counter() - started) * 1000
+            answer = response.choices[0].message.content or ""
+            usage = _usage_from_response(response, target_model, latency_ms)
+            logger.info("[Groq LLM] Conversational response received.")
+            return answer.strip(), usage
+        except Exception as err:
+            logger.error(f"[Groq LLM] Conversational Groq API call failed: {err}", exc_info=True)
             raise
 
 

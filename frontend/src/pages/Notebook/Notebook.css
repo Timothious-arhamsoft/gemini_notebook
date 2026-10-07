@@ -604,13 +604,13 @@
   border-radius: 12px;
   font-size: 0.9rem;
   line-height: 1.5;
-  white-space: pre-wrap;
 }
 
 .chat-msg--user .chat-msg__bubble {
   background: var(--accent);
   color: white;
   border-bottom-right-radius: 2px;
+  white-space: pre-wrap;
 }
 
 .chat-msg--assistant .chat-msg__bubble {
@@ -618,6 +618,7 @@
   border: 1px solid var(--border);
   color: var(--fg-main);
   border-bottom-left-radius: 2px;
+  white-space: normal;
 }
 
 .chat-msg__avatar {
@@ -768,10 +769,9 @@
 }
 
 .chat-msg__citation-row {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto auto;
-  gap: 0.1rem 0.5rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
   width: 100%;
   padding: 0.45rem 0.55rem;
   border: 1px solid var(--border);
@@ -793,11 +793,15 @@
 }
 
 .chat-msg__citation-num {
-  grid-row: 1 / span 2;
-  align-self: center;
+  flex-shrink: 0;
   font-weight: 700;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
+}
+
+.chat-msg__citation-body {
+  min-width: 0;
+  line-height: 1.4;
 }
 
 .chat-msg__citation-title {
@@ -808,9 +812,9 @@
 }
 
 .chat-msg__citation-meta {
-  grid-column: 2;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--fg-muted);
+  font-weight: 400;
 }
 
 .chat-msg__retrieved-summary {
