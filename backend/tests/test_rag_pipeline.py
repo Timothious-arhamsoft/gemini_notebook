@@ -158,7 +158,11 @@ def test_7_context_builder_formatting():
 
     assert len(source_refs) == 2
     assert source_refs[0]["source_title"] == "asthma_guide.pdf"
+    assert source_refs[0]["citation_index"] == 1
+    assert source_refs[0]["chunk_index"] == 3
+    assert source_refs[0]["page"] == 4
     assert "Shortness of breath" in source_refs[0]["excerpt"]
+    assert source_refs[1]["citation_index"] == 2
 
 
 def test_8_unsupported_question_fallback():
@@ -167,8 +171,9 @@ def test_8_unsupported_question_fallback():
     assert context_str == ""
     assert source_refs == []
 
-    fallback_answer = groq_service.generate_grounded_answer(
+    fallback_answer, usage = groq_service.generate_grounded_answer(
         query="What is the distance to Mars?",
         context_str="",
     )
     assert "couldn't find enough information" in fallback_answer.lower()
+    assert usage is None

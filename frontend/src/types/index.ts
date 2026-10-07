@@ -87,10 +87,30 @@ export interface UploadFile {
 // ── Chat ─────────────────────────────────────────────────────
 export type MessageRole = 'user' | 'assistant' | 'system'
 
+export interface GroqUsage {
+  model?: string | null
+  prompt_tokens?: number | null
+  completion_tokens?: number | null
+  total_tokens?: number | null
+  cached_tokens?: number | null
+  estimated_cost_usd?: number | null
+  request_id?: string | null
+  latency_ms?: number | null
+}
+
 export interface Citation {
+  id?: string
+  citation_index?: number
   source_id: string
   source_title: string
-  excerpt: string
+  source_name?: string
+  chunk_id?: string
+  chunk_index?: number
+  page?: number | null
+  section?: string | null
+  excerpt?: string
+  content?: string
+  similarity?: number
 }
 
 export interface ChatMessage {
@@ -99,6 +119,8 @@ export interface ChatMessage {
   role: MessageRole
   content: string
   citations?: Citation[]
+  retrieved_evidence?: Citation[]
+  usage?: GroqUsage
   created_at: string
 }
 

@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { Citation } from '../types'
+import type { Citation, GroqUsage } from '../types'
 
 export interface ApiChatMessage {
   id: string
@@ -7,7 +7,31 @@ export interface ApiChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: string
   citations?: Citation[] | null
+  retrieved_evidence?: Citation[] | null
+  usage?: GroqUsage | null
   created_at: string
+}
+
+function normalizeCitation(c: Citation): Citation {
+  return {
+    ...c,
+    source_id: String(c.source_id),
+    source_title: c.source_title || c.source_name || 'Unknown source',
+    excerpt: c.excerpt ?? c.content?.slice(0, 300) ?? '',
+  }
+}
+
+export function mapApiChatMessage(m: ApiChatMessage) {
+  return {
+    id: m.id,
+    notebook_id: m.notebook_id,
+    role: m.role,
+    content: m.content,
+    citations: m.citations?.map(normalizeCitation) ?? undefined,
+    retrieved_evidence: m.retrieved_evidence?.map(normalizeCitation) ?? undefined,
+    usage: m.usage ?? undefined,
+    created_at: m.created_at,
+  }
 }
 
 export async function fetchChatMessagesApi(notebookId: string): Promise<ApiChatMessage[]> {

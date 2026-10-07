@@ -4,11 +4,11 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ChatMessage, Notebook, Source, User
+from app.models import ChatMessage, User
 from app.rag.generation import run_rag_pipeline
 from app.routers.auth import get_current_user
 from app.routers.sources import _verify_notebook_access
@@ -17,12 +17,34 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+SOURCE_REFS_VERSION = 2
+
 
 # ── Schemas ────────────────────────────────────────────────────
 class CitationSchema(BaseModel):
+    id: Optional[str] = None
+    citation_index: Optional[int] = None
     source_id: Optional[uuid.UUID] = None
     source_title: Optional[str] = None
+    source_name: Optional[str] = None
+    chunk_id: Optional[uuid.UUID] = None
+    chunk_index: Optional[int] = None
+    page: Optional[int] = None
+    section: Optional[str] = None
     excerpt: Optional[str] = None
+    content: Optional[str] = None
+    similarity: Optional[float] = None
+
+
+class UsageSchema(BaseModel):
+    model: Optional[str] = None
+    prompt_tokens: Optional[int] = None
+    completion_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    cached_tokens: Optional[int] = None
+    estimated_cost_usd: Optional[float] = None
+    request_id: Optional[str] = None
+    latency_ms: Optional[float] = None
 
 
 class ChatMessageCreate(BaseModel):
@@ -35,6 +57,8 @@ class ChatMessageResponse(BaseModel):
     role: str
     content: str
     citations: Optional[List[CitationSchema]] = None
+    retrieved_evidence: Optional[List[CitationSchema]] = Field(default=None)
+    usage: Optional[UsageSchema] = None
     created_at: datetime
 
     class Config:
@@ -42,19 +66,90 @@ class ChatMessageResponse(BaseModel):
 
 
 # ── Helpers ────────────────────────────────────────────────────
-def _to_chat_response(msg: ChatMessage) -> ChatMessageResponse:
-    citations = None
-    if msg.source_refs and isinstance(msg.source_refs, list):
-        citations = [CitationSchema(**ref) for ref in msg.source_refs]
+def _normalize_ref(ref: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize legacy and v2 citation/evidence dicts for CitationSchema."""
+    title = ref.get("source_title") or ref.get("source_name")
+    return {
+        "id": ref.get("id"),
+        "citation_index": ref.get("citation_index"),
+        "source_id": ref.get("source_id"),
+        "source_title": title,
+        "source_name": ref.get("source_name") or title,
+        "chunk_id": ref.get("chunk_id"),
+        "chunk_index": ref.get("chunk_index"),
+        "page": ref.get("page"),
+        "section": ref.get("section"),
+        "excerpt": ref.get("excerpt"),
+        "content": ref.get("content") or ref.get("excerpt"),
+        "similarity": ref.get("similarity"),
+    }
 
+
+def _parse_source_refs(source_refs: Any) -> tuple[
+    Optional[List[CitationSchema]],
+    Optional[List[CitationSchema]],
+    Optional[UsageSchema],
+]:
+    """
+    Support both:
+    - legacy list[{source_id, source_title, excerpt}]
+    - v2 dict {citations, retrieved_evidence, usage}
+    """
+    if not source_refs:
+        return None, None, None
+
+    if isinstance(source_refs, list):
+        citations = [CitationSchema(**_normalize_ref(ref)) for ref in source_refs if isinstance(ref, dict)]
+        return citations or None, None, None
+
+    if isinstance(source_refs, dict):
+        citations_raw = source_refs.get("citations") or []
+        evidence_raw = source_refs.get("retrieved_evidence") or []
+        usage_raw = source_refs.get("usage")
+
+        citations = [
+            CitationSchema(**_normalize_ref(ref))
+            for ref in citations_raw
+            if isinstance(ref, dict)
+        ]
+        evidence = [
+            CitationSchema(**_normalize_ref(ref))
+            for ref in evidence_raw
+            if isinstance(ref, dict)
+        ]
+        usage = UsageSchema(**usage_raw) if isinstance(usage_raw, dict) else None
+        return (citations or None), (evidence or None), usage
+
+    return None, None, None
+
+
+def _to_chat_response(msg: ChatMessage) -> ChatMessageResponse:
+    citations, retrieved_evidence, usage = _parse_source_refs(msg.source_refs)
     return ChatMessageResponse(
         id=msg.id,
         notebook_id=msg.notebook_id,
         role=msg.role,
         content=msg.content,
         citations=citations,
+        retrieved_evidence=retrieved_evidence,
+        usage=usage,
         created_at=msg.created_at,
     )
+
+
+def _build_persisted_source_refs(
+    citations: List[Dict[str, Any]],
+    retrieved_evidence: List[Dict[str, Any]],
+    usage: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if not citations and not retrieved_evidence and not usage:
+        return None
+    return {
+        "version": SOURCE_REFS_VERSION,
+        "citations": citations,
+        "retrieved_evidence": retrieved_evidence,
+        "usage": usage,
+    }
 
 
 # ── Routes ────────────────────────────────────────────────────
@@ -121,15 +216,17 @@ def create_chat_message(
     )
 
     ai_content = rag_result.get("answer", "No response generated.")
-    citation_refs = rag_result.get("sources") or None
+    citations = rag_result.get("citations") or []
+    retrieved_evidence = rag_result.get("retrieved_evidence") or []
+    usage = rag_result.get("usage")
 
-    # 3. Save assistant response
+    # 3. Save assistant response with structured refs (citations vs retrieved evidence + usage)
     assistant_msg = ChatMessage(
         id=uuid.uuid4(),
         notebook_id=notebook_id,
         role="assistant",
         content=ai_content,
-        source_refs=citation_refs,
+        source_refs=_build_persisted_source_refs(citations, retrieved_evidence, usage),
     )
     db.add(assistant_msg)
 

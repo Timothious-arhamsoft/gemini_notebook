@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { notebooksApi } from '../../api/notebooks'
 import { uploadSourceApi, fetchSourcesApi, deleteSourceApi, fetchSourceStatusApi } from '../../api/sources'
-import { fetchChatMessagesApi, sendChatMessageApi } from '../../api/chat'
+import { fetchChatMessagesApi, mapApiChatMessage, sendChatMessageApi } from '../../api/chat'
+import { citationSelectionKey } from '../../utils/assistantContent'
+import type { GroqUsage } from '../../types'
 import { WorkspaceHeader } from './components/WorkspaceHeader/WorkspaceHeader'
 import { SourcesSidebar } from './components/SourcesSidebar/SourcesSidebar'
 import { StudioSidebar } from './components/StudioSidebar/StudioSidebar'
@@ -38,6 +40,7 @@ export function NotebookPage() {
   const [logs, setLogs] = useState<string[]>([])
   // Active citation detail view
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null)
+  const [latestAiUsage, setLatestAiUsage] = useState<GroqUsage | null>(null)
 
   // Track whether the user has manually set the title
   const userHasRenamedRef = useRef(false)
@@ -102,15 +105,12 @@ export function NotebookPage() {
         }
 
         if (existingChatMessages.length > 0) {
-          const loadedMessages: ChatMessageType[] = existingChatMessages.map(m => ({
-            id: m.id,
-            notebook_id: m.notebook_id,
-            role: m.role as 'user' | 'assistant' | 'system',
-            content: m.content,
-            citations: m.citations ?? undefined,
-            created_at: m.created_at,
-          }))
+          const loadedMessages: ChatMessageType[] = existingChatMessages.map(m => mapApiChatMessage(m))
           setMessages(loadedMessages)
+          const lastAssistant = [...loadedMessages].reverse().find(m => m.role === 'assistant')
+          if (lastAssistant?.usage) {
+            setLatestAiUsage(lastAssistant.usage)
+          }
         }
       })
       .catch(err => {
@@ -347,20 +347,29 @@ export function NotebookPage() {
 
     try {
       const savedMessages = await sendChatMessageApi(id, trimmed)
-      const formatted: ChatMessageType[] = savedMessages.map(m => ({
-        id: m.id,
-        notebook_id: m.notebook_id,
-        role: m.role as 'user' | 'assistant' | 'system',
-        content: m.content,
-        citations: m.citations ?? undefined,
-        created_at: m.created_at,
-      }))
+      const formatted: ChatMessageType[] = savedMessages.map(m => mapApiChatMessage(m))
+      const assistantMsg = formatted.find(m => m.role === 'assistant')
 
       setMessages(prev => {
         const withoutTemp = prev.filter(m => m.id !== tempUserMsg.id)
         return [...withoutTemp, ...formatted]
       })
-      addLog(`[ASSISTANT ANSWER] Response saved to database.`)
+
+      if (assistantMsg?.retrieved_evidence?.length) {
+        addLog(`[RETRIEVAL] ${assistantMsg.retrieved_evidence.length} relevant chunks retrieved`)
+      }
+      if (assistantMsg?.citations?.length) {
+        addLog(`[GENERATION] ${assistantMsg.citations.length} citation${assistantMsg.citations.length === 1 ? '' : 's'} in answer`)
+      }
+      if (assistantMsg?.usage) {
+        setLatestAiUsage(assistantMsg.usage)
+        const total = assistantMsg.usage.total_tokens
+        addLog(
+          `[GENERATION] Model response complete${total != null ? ` · ${total.toLocaleString()} tokens` : ''}`,
+        )
+      } else {
+        addLog('[ASSISTANT ANSWER] Response saved to database.')
+      }
     } catch (err: any) {
       console.error('Failed to send chat message:', err)
       addLog(`[ERROR] Failed to save chat message: ${err?.response?.data?.detail || err.message}`)
@@ -486,6 +495,7 @@ export function NotebookPage() {
                 <ChatMessage
                   key={msg.id}
                   message={msg}
+                  activeCitationKey={activeCitation ? citationSelectionKey(activeCitation) : null}
                   onCitationClick={citation => setActiveCitation(citation)}
                 />
               ))
@@ -515,6 +525,7 @@ export function NotebookPage() {
           onClearCitation={() => setActiveCitation(null)}
           uploads={uploads}
           logs={logs}
+          latestAiUsage={latestAiUsage}
         />
       </div>
 

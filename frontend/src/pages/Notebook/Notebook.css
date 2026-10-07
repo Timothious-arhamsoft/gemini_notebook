@@ -616,11 +616,203 @@
   border-bottom-left-radius: 2px;
 }
 
+.chat-msg__avatar {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+
+.chat-msg--user .chat-msg__avatar {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.chat-msg__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-msg__plain {
+  margin: 0;
+}
+
+.chat-msg__markdown {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.chat-msg__markdown > :first-child {
+  margin-top: 0;
+}
+
+.chat-msg__markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-msg__markdown p {
+  margin: 0 0 0.65rem;
+}
+
+.chat-msg__markdown ul,
+.chat-msg__markdown ol {
+  margin: 0 0 0.65rem;
+  padding-left: 1.25rem;
+}
+
+.chat-msg__markdown li {
+  margin-bottom: 0.25rem;
+}
+
+.chat-msg__markdown strong {
+  font-weight: 600;
+}
+
+.chat-msg__markdown code {
+  font-size: 0.85em;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  background: var(--bg-hover);
+}
+
+.chat-msg__markdown pre {
+  margin: 0 0 0.65rem;
+  padding: 0.75rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+}
+
+.chat-msg__cite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6rem;
+  margin: 0 0.15rem;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.4;
+  vertical-align: baseline;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.chat-msg__cite:hover {
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-card));
+  border-color: var(--accent);
+}
+
+.chat-msg__cite:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.chat-msg__cite--active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.chat-msg__cite--invalid {
+  border-style: dashed;
+  color: var(--fg-muted);
+  background: transparent;
+  cursor: default;
+  font-weight: 500;
+}
+
 .chat-msg__citations {
-  margin-top: 0.6rem;
-  padding-top: 0.6rem;
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
   border-top: 1px solid var(--border);
   font-size: 0.8rem;
+}
+
+.chat-msg__citations-label {
+  margin: 0 0 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.chat-msg__citations-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.chat-msg__citation-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 0.1rem 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-main);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.chat-msg__citation-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: var(--bg-hover);
+}
+
+.chat-msg__citation-row--active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-main));
+}
+
+.chat-msg__citation-num {
+  grid-row: 1 / span 2;
+  align-self: center;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-msg__citation-title {
+  margin: 0;
+  font-weight: 500;
+  color: var(--fg-main);
+  word-break: break-word;
+}
+
+.chat-msg__citation-meta {
+  grid-column: 2;
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+}
+
+.chat-msg__retrieved-summary {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.82rem;
 }
 
 .chat-msg__citation-tag {
@@ -629,7 +821,7 @@
   gap: 0.3rem;
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
-  background: var(--accent-light);
+  background: color-mix(in srgb, var(--accent) 15%, var(--bg-card));
   color: var(--accent);
   font-weight: 500;
   margin-top: 0.25rem;

@@ -1,49 +1,88 @@
 import type { ChatMessage as ChatMessageType, Citation } from '../../../../types'
+import {
+  citationSelectionKey,
+  formatCitationMeta,
+  isInsufficientAnswer,
+} from '../../../../utils/assistantContent'
+import { AssistantMessageBody } from './AssistantMessageBody'
 
 interface Props {
   message: ChatMessageType
+  activeCitationKey?: string | null
   onCitationClick?: (citation: Citation) => void
 }
 
-export function ChatMessage({ message, onCitationClick }: Props) {
+export function ChatMessage({ message, activeCitationKey, onCitationClick }: Props) {
   const isUser = message.role === 'user'
+  const insufficient = !isUser && isInsufficientAnswer(message.content)
+
+  const sourceList = insufficient
+    ? []
+    : (message.citations?.length ? message.citations : [])
+
+  const retrievedCount = message.retrieved_evidence?.length ?? 0
 
   return (
-    <div className={`chat-msg chat-msg--${isUser ? 'user' : 'ai'}`}>
+    <div className={`chat-msg chat-msg--${isUser ? 'user' : 'assistant'}`}>
       <div className="chat-msg__avatar" aria-label={isUser ? 'You' : 'AI'}>
-        {isUser ? 'U' : (
+        {isUser ? (
+          'U'
+        ) : (
           <svg width="14" height="14" viewBox="0 0 28 28" fill="none">
-            <rect width="28" height="28" rx="4" fill="var(--accent)" opacity="0.8"/>
-            <path d="M7 7h8a6 6 0 0 1 0 12H7V7Z" fill="white" opacity="0.9"/>
+            <rect width="28" height="28" rx="4" fill="var(--accent)" opacity="0.8" />
+            <path d="M7 7h8a6 6 0 0 1 0 12H7V7Z" fill="white" opacity="0.9" />
           </svg>
         )}
       </div>
 
       <div className="chat-msg__body">
-        <p className="chat-msg__content">{message.content}</p>
+        <div className="chat-msg__bubble">
+          {isUser ? (
+            <p className="chat-msg__plain">{message.content}</p>
+          ) : (
+            <AssistantMessageBody
+              content={message.content}
+              citations={message.citations}
+              retrievedEvidence={message.retrieved_evidence}
+              activeCitationKey={activeCitationKey}
+              onCitationClick={onCitationClick}
+            />
+          )}
+        </div>
 
-        {message.citations && message.citations.length > 0 && (
+        {!isUser && insufficient && retrievedCount > 0 && (
+          <div className="chat-msg__citations chat-msg__citations--retrieved">
+            <p className="chat-msg__citations-label">Retrieved sources</p>
+            <p className="chat-msg__retrieved-summary">
+              {retrievedCount} source{retrievedCount === 1 ? '' : 's'} were checked
+            </p>
+          </div>
+        )}
+
+        {!isUser && !insufficient && sourceList.length > 0 && (
           <div className="chat-msg__citations">
-            <p className="chat-msg__citations-label">Sources &amp; Citations</p>
-            <div className="chat-msg__citations-list">
-              {message.citations.map((c, i) => (
-                <div
-                  key={i}
-                  className="chat-msg__citation"
-                  onClick={() => onCitationClick?.(c)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={e => e.key === 'Enter' && onCitationClick?.(c)}
-                  title="Click to view highlighted chunk citation in sidebar"
-                >
-                  <span className="chat-msg__citation-num">{i + 1}</span>
-                  <div>
-                    <p className="chat-msg__citation-title">{c.source_title}</p>
-                    {c.excerpt && <p className="chat-msg__citation-excerpt">"{c.excerpt}"</p>}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <p className="chat-msg__citations-label">Sources</p>
+            <ul className="chat-msg__citations-list">
+              {sourceList.map((c, i) => {
+                const num = c.citation_index ?? i + 1
+                const selKey = citationSelectionKey(c)
+                const isActive = activeCitationKey === selKey
+                const meta = formatCitationMeta(c)
+                return (
+                  <li key={selKey}>
+                    <button
+                      type="button"
+                      className={`chat-msg__citation-row${isActive ? ' chat-msg__citation-row--active' : ''}`}
+                      onClick={() => onCitationClick?.(c)}
+                    >
+                      <span className="chat-msg__citation-num">[{num}]</span>
+                      <span className="chat-msg__citation-title">{c.source_title}</span>
+                      {meta && <span className="chat-msg__citation-meta">{meta}</span>}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
           </div>
         )}
       </div>

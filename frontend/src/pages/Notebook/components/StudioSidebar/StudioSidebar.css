@@ -283,6 +283,90 @@
   border-radius: 3px;
 }
 
+.studio-sidebar__title--inline {
+  margin-left: auto;
+  font-size: 0.88rem;
+}
+
+.studio-sidebar__divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.25rem 0;
+}
+
+.studio-sidebar__citation-meta {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+  color: var(--fg-muted);
+}
+
+.studio-sidebar__citation-badge {
+  display: inline-block;
+  margin: 0.5rem 0 0;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-main));
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.studio-sidebar__meta-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.studio-sidebar__meta-list dt {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted);
+}
+
+.studio-sidebar__meta-list dd {
+  margin: 0.15rem 0 0;
+  font-size: 0.78rem;
+  word-break: break-all;
+  color: var(--fg-main);
+  font-family: ui-monospace, monospace;
+}
+
+.studio-sidebar__usage-card {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-main);
+}
+
+.studio-sidebar__usage-model {
+  margin: 0 0 0.65rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg-main);
+}
+
+.studio-sidebar__usage-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 1rem;
+  font-size: 0.82rem;
+}
+
+.studio-sidebar__usage-label {
+  color: var(--fg-muted);
+}
+
+.studio-sidebar__usage-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--fg-main);
+}
+
 /* ── Analysis toggle ─────────────────────────────────────── */
 .studio-sidebar__analysis-toggle {
   display: flex;

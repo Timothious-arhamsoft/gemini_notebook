@@ -1,21 +1,42 @@
 import logging
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
+
 from app.rag.retrieval import RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
 
-def build_context(retrieved_chunks: List[RetrievedChunk]) -> Tuple[str, List[Dict[str, str]]]:
+def _chunk_to_evidence_ref(idx: int, chunk: RetrievedChunk) -> Dict[str, Any]:
+    """Build a stable evidence/citation ref keyed by [Source N] index."""
+    content = chunk.content.strip()
+    excerpt = content[:300] + "..." if len(content) > 300 else content
+    return {
+        "id": f"citation-{idx}",
+        "citation_index": idx,
+        "source_id": str(chunk.source_id),
+        "source_title": chunk.source_name,
+        "source_name": chunk.source_name,
+        "chunk_id": str(chunk.chunk_id),
+        "chunk_index": chunk.chunk_index,
+        "page": chunk.page,
+        "section": chunk.section,
+        "excerpt": excerpt,
+        "content": content,
+        "similarity": chunk.similarity,
+    }
+
+
+def build_context(retrieved_chunks: List[RetrievedChunk]) -> Tuple[str, List[Dict[str, Any]]]:
     """
     Converts a list of retrieved chunks into:
     1. Formatted prompt context string with numbered [Source N] headers.
-    2. Citation metadata list suitable for storing in ChatMessage.source_refs.
+    2. Evidence metadata list (retrieval order = citation_index).
     """
     if not retrieved_chunks:
         return "", []
 
     context_blocks: List[str] = []
-    source_refs: List[Dict[str, str]] = []
+    evidence_refs: List[Dict[str, Any]] = []
 
     for idx, chunk in enumerate(retrieved_chunks, start=1):
         lines: List[str] = [f"[Source {idx}]", f"Document: {chunk.source_name}"]
@@ -30,17 +51,8 @@ def build_context(retrieved_chunks: List[RetrievedChunk]) -> Tuple[str, List[Dic
         lines.append(chunk.content.strip())
 
         context_blocks.append("\n".join(lines))
-
-        # Build citation for UI sidebar highlighting
-        excerpt = chunk.content[:300] + "..." if len(chunk.content) > 300 else chunk.content
-        source_refs.append(
-            {
-                "source_id": str(chunk.source_id),
-                "source_title": chunk.source_name,
-                "excerpt": excerpt,
-            }
-        )
+        evidence_refs.append(_chunk_to_evidence_ref(idx, chunk))
 
     context_str = "\n\n---\n\n".join(context_blocks)
     logger.info(f"[RAG Context] Built context string with {len(retrieved_chunks)} source blocks")
-    return context_str, source_refs
+    return context_str, evidence_refs
