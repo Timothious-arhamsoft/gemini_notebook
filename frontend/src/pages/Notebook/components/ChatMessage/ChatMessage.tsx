@@ -1,8 +1,10 @@
 import type { ChatMessage as ChatMessageType, Citation } from '../../../../types'
 import {
+  buildCitationIndexMap,
   citationSelectionKey,
   formatCitationMeta,
   isInsufficientAnswer,
+  segmentAssistantContent,
 } from '../../../../utils/assistantContent'
 import { AssistantMessageBody } from './AssistantMessageBody'
 
@@ -12,13 +14,27 @@ interface Props {
   onCitationClick?: (citation: Citation) => void
 }
 
+/** Prefer persisted citations; recover from markers + retrieved_evidence if needed. */
+function resolveSourceList(message: ChatMessageType): Citation[] {
+  if (message.citations?.length) return message.citations
+  const map = buildCitationIndexMap(undefined, message.retrieved_evidence)
+  if (map.size === 0) return []
+  const seen = new Set<number>()
+  const recovered: Citation[] = []
+  for (const part of segmentAssistantContent(message.content)) {
+    if (part.type !== 'citation' || seen.has(part.index)) continue
+    seen.add(part.index)
+    const ref = map.get(part.index)
+    if (ref) recovered.push(ref)
+  }
+  return recovered
+}
+
 export function ChatMessage({ message, activeCitationKey, onCitationClick }: Props) {
   const isUser = message.role === 'user'
   const insufficient = !isUser && isInsufficientAnswer(message.content)
 
-  const sourceList = insufficient
-    ? []
-    : (message.citations?.length ? message.citations : [])
+  const sourceList = insufficient ? [] : resolveSourceList(message)
 
   const retrievedCount = message.retrieved_evidence?.length ?? 0
 

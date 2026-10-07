@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,6 +18,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 SOURCE_REFS_VERSION = 2
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _assistant_created_at(user_created_at: datetime) -> datetime:
+    """
+    Ensure the assistant timestamp is strictly after its triggering user message.
+
+    Both rows used to rely on PostgreSQL now() inside one transaction, which made
+    created_at identical and left GET history non-deterministic under ORDER BY
+    created_at alone (UUID ids are not chronological).
+    """
+    now = _utc_now()
+    if now > user_created_at:
+        return now
+    return user_created_at + timedelta(microseconds=1)
 
 
 # ── Schemas ────────────────────────────────────────────────────
@@ -165,10 +183,12 @@ def list_chat_messages(
     """List all chat messages for a notebook in chronological order."""
     _verify_notebook_access(notebook_id, current_user, db)
 
+    # Authoritative chronological order: oldest → newest.
+    # Secondary id tie-break keeps the sort deterministic if timestamps collide.
     messages = (
         db.query(ChatMessage)
         .filter(ChatMessage.notebook_id == notebook_id)
-        .order_by(ChatMessage.created_at.asc())
+        .order_by(ChatMessage.created_at.asc(), ChatMessage.id.asc())
         .all()
     )
     return [_to_chat_response(m) for m in messages]
@@ -202,12 +222,15 @@ def create_chat_message(
     # excludes the current question (and avoids autoflush including it).
     conversation_history = load_conversation_history(notebook_id, db)
 
-    # 1. Save user message
+    # 1. Persist user message with an explicit timestamp (do not rely on
+    # transaction-scoped server now(), which collapses user+assistant times).
+    user_created_at = _utc_now()
     user_msg = ChatMessage(
         id=uuid.uuid4(),
         notebook_id=notebook_id,
         role="user",
         content=text,
+        created_at=user_created_at,
     )
     db.add(user_msg)
 
@@ -225,12 +248,13 @@ def create_chat_message(
     retrieved_evidence = rag_result.get("retrieved_evidence") or []
     usage = rag_result.get("usage")
 
-    # 3. Save assistant response with structured refs (citations vs retrieved evidence + usage)
+    # 3. Persist assistant after the user message in chronological order.
     assistant_msg = ChatMessage(
         id=uuid.uuid4(),
         notebook_id=notebook_id,
         role="assistant",
         content=ai_content,
+        created_at=_assistant_created_at(user_created_at),
         source_refs=_build_persisted_source_refs(citations, retrieved_evidence, usage),
     )
     db.add(assistant_msg)

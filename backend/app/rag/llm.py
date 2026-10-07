@@ -1,13 +1,22 @@
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from groq import Groq
 
 from app.config import settings
+from app.rag.citations import normalize_citation_markers
 from app.rag.pricing import build_usage_metadata
 
 logger = logging.getLogger(__name__)
+
+# Strip prior-turn [Source N] markers from history so they are not mistaken for
+# the current turn's retrieved excerpts (and so the model keeps citing anew).
+_HISTORY_SOURCE_MARKER_RE = re.compile(
+    r"(?:\[Source\s+\d+\]|[【［]\s*Source\s+\d+\s*[】］])",
+    re.IGNORECASE,
+)
 
 UNIFIED_SYSTEM_PROMPT = """You are NoteGenio Assistant.
 
@@ -54,8 +63,9 @@ STRICT DOCUMENT GROUNDING:
 - Do NOT invent, assume, or extrapolate unsupported facts.
 - Do NOT use outside general knowledge to fill gaps in document-specific questions.
 - Preserve important qualifications, conditions, or disclaimers from the sources.
-- Cite source numbers (e.g. [Source 1], [Source 2]) whenever you make factual claims based on specific excerpts.
-- Never fabricate citations or reference non-existent sources.
+- REQUIRED CITATIONS: After every factual claim taken from the excerpts, append an ASCII citation exactly like [Source 1] or [Source 2] (same numbers as the excerpt headers).
+- Do not use footnotes, (1), Source 1 without brackets, or other formats — only [Source N].
+- Never fabricate citations or reference non-existent source numbers.
 - If the retrieved context is insufficient, clearly state: "I couldn't find enough information about that in the uploaded sources."
 
 ### D. Source / file inventory questions
@@ -67,18 +77,22 @@ Do not invent file names.
 Some questions need both product/system knowledge and document context
 (e.g. "How does NoteGenio use the documents I uploaded to answer questions?").
 Use both when needed. Do not force the question into a single category.
+When you use document excerpts in a mixed answer, still cite them with [Source N].
 
 ### F. Conversation continuity
 Use conversation history to interpret follow-ups and meta questions:
 - "What about prevention?" after a malaria discussion → prevention related to malaria.
 - "What did I just ask?" / "What disease was I asking about?" → answer from recent turns.
 Do not ignore prior turns when the current message depends on them.
+Conversation history is for understanding meaning and references only — not document evidence.
+For document facts, use the current turn's retrieved [Source N] excerpts and cite those numbers.
+Do not reuse or invent citation numbers from earlier chat turns.
 
 ## Retrieved document context policy
 Retrieved document excerpts are evidence for document-related questions — not mandatory content for every question.
 If retrieved excerpts are irrelevant to the user's intent (for example, malaria chunks when the user asks "Who are you?"), IGNORE them completely.
 Never let irrelevant retrieval force a document-grounding failure or a malaria-style answer for a non-document question.
-Only cite [Source N] when you actually used that excerpt."""
+When the question IS about the uploaded documents and you use an excerpt, you MUST cite it with [Source N] so the UI can open that source."""
 
 SYSTEM_PROMPT = UNIFIED_SYSTEM_PROMPT
 
@@ -156,11 +170,24 @@ def _build_system_content(
     return "".join(parts)
 
 
+def _history_content_for_llm(content: str) -> str:
+    """Keep conversational meaning; strip prior [Source N] so they are not evidence."""
+    text = normalize_citation_markers(content or "")
+    text = _HISTORY_SOURCE_MARKER_RE.sub("", text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    return text.strip()
+
+
 def _build_user_content(query: str, document_context: Optional[str]) -> str:
     context = (document_context or "").strip()
     if context:
         return (
-            "Retrieved document excerpts (use only when relevant to the user's question):\n\n"
+            "Here is the context extracted from the uploaded documents.\n"
+            "Use these excerpts only when the user question is about the documents.\n"
+            "When you use them, cite each claim inline with [Source N] matching the headers below "
+            "(required for clickable citations in the UI):\n\n"
             f"{context}\n\n"
             "---\n\n"
             f"User question: {query}"
@@ -222,7 +249,7 @@ class GroqService:
 
         for turn in conversation_history or []:
             role = turn.get("role")
-            content = (turn.get("content") or "").strip()
+            content = _history_content_for_llm(turn.get("content") or "")
             if role not in ("user", "assistant") or not content:
                 continue
             messages.append({"role": role, "content": content})
@@ -244,10 +271,13 @@ class GroqService:
                 max_tokens=1024,
             )
             latency_ms = (time.perf_counter() - started) * 1000
-            answer = response.choices[0].message.content or ""
+            # Canonicalize markers so the frontend can turn them into clickable cites.
+            answer = normalize_citation_markers(
+                (response.choices[0].message.content or "").strip()
+            )
             usage = _usage_from_response(response, target_model, latency_ms)
             logger.info("[Groq LLM] Successfully received response from Groq API.")
-            return answer.strip(), usage
+            return answer, usage
         except Exception as err:
             logger.error(f"[Groq LLM] Groq API call failed: {err}", exc_info=True)
             raise

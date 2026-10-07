@@ -59,6 +59,8 @@ def test_unified_prompt_covers_intent_boundaries():
     assert "source inventory" in text
     assert "couldn't find enough information" in text
     assert "conversation history" in text
+    assert "required citations" in text
+    assert "[source n]" in text
 
 
 def test_system_content_includes_inventory_and_models():
@@ -83,7 +85,20 @@ def test_user_content_marks_missing_and_present_docs():
         "[Source 1]\nDocument: malaria.pdf\n\nMalaria is caused by Plasmodium.",
     )
     assert "[Source 1]" in with_docs
-    assert "use only when relevant" in with_docs.lower()
+    assert "cite each claim inline with [Source N]" in with_docs
+    assert "clickable citations" in with_docs.lower()
+
+
+def test_history_strips_prior_source_markers_for_llm():
+    from app.rag.llm import _history_content_for_llm
+
+    cleaned = _history_content_for_llm(
+        "Malaria is caused by Plasmodium. [Source 1] Also see【Source 2】."
+    )
+    assert "[Source" not in cleaned
+    assert "Source" not in cleaned
+    assert "Malaria is caused by Plasmodium." in cleaned
+    assert "Also see" in cleaned
 
 
 def test_build_retrieval_query_is_conversation_aware():
