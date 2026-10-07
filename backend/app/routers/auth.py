@@ -11,10 +11,17 @@ from fastapi import (
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, field_validator
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.config import settings
+from app.auth_validation import (
+    validate_email_address,
+    validate_full_name,
+    validate_password,
+    validate_username,
+)
 from app.database import get_db
 from app.models import User
 
@@ -107,13 +114,43 @@ def get_current_user(
     return user
 
 
+def _duplicate_account_detail(exc: IntegrityError) -> str:
+    """Map DB unique violations to clean client messages (no SQL details)."""
+    raw = str(getattr(exc, "orig", None) or exc).lower()
+    if "username" in raw:
+        return "Username already taken."
+    if "email" in raw:
+        return "Email already registered."
+    return "Account already exists."
+
+
 # ─── Schemas ────────────────────────────────────────────────
 
 class UserRegister(BaseModel):
-    email: EmailStr
+    email: str
     username: str
-    full_name: str | None = None
+    full_name: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, value: str) -> str:
+        return validate_email_address(value)
+
+    @field_validator("username")
+    @classmethod
+    def _validate_username(cls, value: str) -> str:
+        return validate_username(value)
+
+    @field_validator("full_name")
+    @classmethod
+    def _validate_full_name(cls, value: str) -> str:
+        return validate_full_name(value)
+
+    @field_validator("password")
+    @classmethod
+    def _validate_password(cls, value: str) -> str:
+        return validate_password(value)
 
 
 class UserResponse(BaseModel):
@@ -130,8 +167,13 @@ class UserResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, value: str) -> str:
+        return validate_email_address(value)
 
 
 class TokenResponse(BaseModel):
@@ -152,16 +194,24 @@ def register(
 ):
     """Register a new user."""
 
-    existing_user = (
+    if (
         db.query(User)
-        .filter(User.email == payload.email)
+        .filter(func.lower(User.email) == payload.email)
         .first()
-    )
-
-    if existing_user:
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered",
+            detail="Email already registered.",
+        )
+
+    if (
+        db.query(User)
+        .filter(func.lower(User.username) == payload.username)
+        .first()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already taken.",
         )
 
     user = User(
@@ -172,9 +222,16 @@ def register(
     )
 
     db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_duplicate_account_detail(exc),
+        ) from None
 
+    db.refresh(user)
     return user
 
 
@@ -190,7 +247,7 @@ def login(
 
     user = (
         db.query(User)
-        .filter(User.email == payload.email)
+        .filter(func.lower(User.email) == payload.email)
         .first()
     )
 

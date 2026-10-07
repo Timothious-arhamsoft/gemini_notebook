@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { isAxiosError } from 'axios'
 import { authApi } from '../../../../api/auth'
 import { useAuth } from '../../../../contexts/AuthContext'
 import { Button } from '../../../../components/Button'
 import type { LoginPayload } from '../../../../types'
+import { formatAuthApiError } from '../../../../utils/authValidation'
 
 export function LoginForm({ onSwitch }: { onSwitch: () => void }) {
   const { login } = useAuth()
@@ -17,11 +19,16 @@ export function LoginForm({ onSwitch }: { onSwitch: () => void }) {
     setError('')
     setLoading(true)
     try {
-      const tokens = await authApi.login(form)
+      // Normalize email only — never trim/alter password
+      const tokens = await authApi.login({
+        email: form.email.trim().toLowerCase(),
+        password: form.password,
+      })
       await login(tokens.access_token)
       navigate('/dashboard')
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid email or password')
+    } catch (err: unknown) {
+      const detail = isAxiosError(err) ? err.response?.data?.detail : undefined
+      setError(formatAuthApiError(detail, 'Invalid email or password'))
     } finally {
       setLoading(false)
     }
