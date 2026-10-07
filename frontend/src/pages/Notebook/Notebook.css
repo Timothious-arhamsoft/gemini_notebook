@@ -281,6 +281,10 @@
   gap: 2px;
 }
 
+.sources-sidebar__item-info .doc-status {
+  margin-top: 2px;
+}
+
 .sources-sidebar__item-name {
   font-size: 0.85rem;
   font-weight: 600;

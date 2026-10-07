@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { UploadFile } from '../../../../types'
+import { DocumentProcessingStatus } from '../DocumentProcessingStatus'
 
 export interface FileTypeConfig {
   extension: string
@@ -106,26 +107,18 @@ export function SourceUpload({ uploads, onAdd, onRemove, onRetry }: Props) {
               <div className="source-upload__card-main">
                 <div className="source-upload__card-info">
                   <span className="source-upload__filename">{item.file.name}</span>
-                  <span className="source-upload__filesize">{formatFileSize(item.file.size)}</span>
-                  {item.status === 'error' && (
-                    <span className="source-upload__error-msg">Upload Failed</span>
-                  )}
+                  <span className="source-upload__filesize">
+                    {formatFileSize(item.file_size ?? item.file.size)}
+                  </span>
+                  <DocumentProcessingStatus
+                    upload={item}
+                    onRetry={onRetry}
+                    retryDisabled={!!item.retrying}
+                    compact
+                  />
                 </div>
 
                 <div className="source-upload__card-actions">
-                  {item.status === 'error' && onRetry && (
-                    <button
-                      className="source-upload__action-btn"
-                      onClick={() => onRetry(item.id)}
-                      title="Retry upload"
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="23 4 23 10 17 10"/>
-                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                      </svg>
-                    </button>
-                  )}
-
                   {item.status === 'uploading' ? (
                     <button
                       className="source-upload__action-btn"

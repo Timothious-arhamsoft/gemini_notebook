@@ -3,7 +3,7 @@ import os
 import shutil
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -34,6 +34,18 @@ STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "storage"
 
 
 # ── Schemas ────────────────────────────────────────────────────
+class ProcessingTimingsSchema(BaseModel):
+    upload_s: Optional[float] = None
+    parse_and_analysis_s: Optional[float] = None
+    chunking_s: Optional[float] = None
+    embedding_s: Optional[float] = None
+    embedding_model_load_s: Optional[float] = None
+    embedding_encode_s: Optional[float] = None
+    database_save_s: Optional[float] = None
+    total_s: Optional[float] = None
+    chunk_count: Optional[int] = None
+
+
 class SourceResponse(BaseModel):
     id: uuid.UUID
     notebook_id: uuid.UUID
@@ -48,6 +60,11 @@ class SourceResponse(BaseModel):
     updated_at: datetime
     analysis: Optional[Dict[str, Any]] = None
     file_size: Optional[int] = None
+    processing_started_at: Optional[datetime] = None
+    processing_completed_at: Optional[datetime] = None
+    processing_failed_at: Optional[datetime] = None
+    processing_timings: Optional[Dict[str, Any]] = None
+    chunk_count: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -61,6 +78,11 @@ class SourceStatusResponse(BaseModel):
     progress_label: str
     analysis: Optional[Dict[str, Any]] = None
     token_count: Optional[int] = None
+    processing_started_at: Optional[datetime] = None
+    processing_completed_at: Optional[datetime] = None
+    processing_failed_at: Optional[datetime] = None
+    processing_timings: Optional[Dict[str, Any]] = None
+    is_stale: bool = False
 
 
 class RetrieveRequest(BaseModel):
@@ -91,15 +113,64 @@ def _verify_notebook_access(
     return nb
 
 
-def _build_source_response(source: Source) -> SourceResponse:
+STALE_PROCESSING_SECONDS = 300  # 5 minutes
+
+
+def _chunk_count(db: Session, source_id: uuid.UUID) -> int:
+    return db.query(Chunk).filter(Chunk.source_id == source_id).count()
+
+
+def _is_stale_processing(source: Source) -> bool:
+    if source.status not in {"pending", "processing", "analyzing", "chunking", "embedding"}:
+        return False
+    started = source.processing_started_at or source.updated_at or source.created_at
+    if not started:
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    elapsed = (datetime.now(timezone.utc) - started).total_seconds()
+    return elapsed > STALE_PROCESSING_SECONDS
+
+
+def _build_source_response(source: Source, db: Session) -> SourceResponse:
     res = SourceResponse.model_validate(source)
     res.analysis = source.analysis
+    res.chunk_count = _chunk_count(db, source.id)
     if source.file_path and os.path.exists(source.file_path):
         try:
             res.file_size = os.path.getsize(source.file_path)
         except Exception:
             res.file_size = None
     return res
+
+
+def _build_status_response(source: Source, db: Session) -> SourceStatusResponse:
+    chunk_count = _chunk_count(db, source.id)
+    _PROGRESS_LABELS: dict[str, str] = {
+        "pending": "Pending…",
+        "processing": "Extracting document…",
+        "analyzing": "Analyzing document…",
+        "chunking": "Splitting into chunks…",
+        "embedding": "Generating embeddings…",
+        "ready": "Ready",
+        "completed": "Ready",
+        "error": "Failed",
+        "failed": "Failed",
+    }
+    return SourceStatusResponse(
+        id=source.id,
+        status=source.status,
+        error_message=source.error_message,
+        chunk_count=chunk_count,
+        progress_label=_PROGRESS_LABELS.get(source.status, source.status),
+        analysis=source.analysis,
+        token_count=source.token_count,
+        processing_started_at=source.processing_started_at,
+        processing_completed_at=source.processing_completed_at,
+        processing_failed_at=source.processing_failed_at,
+        processing_timings=source.processing_timings,
+        is_stale=_is_stale_processing(source),
+    )
 
 
 # ── Background task runner ────────────────────────────────────
@@ -115,6 +186,7 @@ def _run_pipeline_in_background(source_id: uuid.UUID) -> None:
             if source:
                 source.status = "failed"
                 source.error_message = str(exc)
+                source.processing_failed_at = datetime.now(timezone.utc)
                 db.commit()
         except Exception:
             pass
@@ -178,6 +250,7 @@ def upload_source(
         title=file.filename,
         file_path=str(saved_file_path),
         status="processing",
+        processing_started_at=datetime.now().astimezone(),
     )
     db.add(source)
     db.commit()
@@ -193,7 +266,7 @@ def upload_source(
     thread.start()
     logger.info(f"[Upload] Launched background pipeline thread for source {source_id}")
 
-    return _build_source_response(source)
+    return _build_source_response(source, db)
 
 
 @router.get(
@@ -216,29 +289,65 @@ def get_source_status(
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
 
-    chunk_count = db.query(Chunk).filter(Chunk.source_id == source_id).count()
+    return _build_status_response(source, db)
 
-    _PROGRESS_LABELS: dict[str, str] = {
-        "pending": "Pending…",
-        "processing": "Extracting document…",
-        "analyzing": "Analyzing document…",
-        "chunking": "Splitting into chunks…",
-        "embedding": "Generating embeddings…",
-        "ready": "Ready",
-        "completed": "Ready",
-        "error": "Failed",
-        "failed": "Failed",
-    }
 
-    return SourceStatusResponse(
-        id=source.id,
-        status=source.status,
-        error_message=source.error_message,
-        chunk_count=chunk_count,
-        progress_label=_PROGRESS_LABELS.get(source.status, source.status),
-        analysis=source.analysis,
-        token_count=source.token_count,
+@router.post(
+    "/{notebook_id}/sources/{source_id}/retry",
+    response_model=SourceStatusResponse,
+)
+def retry_source_processing(
+    notebook_id: uuid.UUID,
+    source_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retry ingestion/embedding for a failed or stale source.
+    Removes incomplete chunks and re-runs the runtime pipeline idempotently.
+    """
+    _verify_notebook_access(notebook_id, current_user, db)
+    source = (
+        db.query(Source)
+        .filter(Source.id == source_id, Source.notebook_id == notebook_id)
+        .first()
     )
+    if not source:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source not found")
+
+    if source.status in ("completed", "ready"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source is already ready. Delete and re-upload to process again.",
+        )
+
+    if source.status in ("pending", "processing", "analyzing", "chunking", "embedding"):
+        if not _is_stale_processing(source):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Source is still processing. Retry when failed or stale.",
+            )
+
+    db.query(Chunk).filter(Chunk.source_id == source.id).delete()
+    source.status = "processing"
+    source.error_message = None
+    source.processing_started_at = datetime.now().astimezone()
+    source.processing_completed_at = None
+    source.processing_failed_at = None
+    source.processing_timings = None
+    db.commit()
+    db.refresh(source)
+
+    thread = threading.Thread(
+        target=_run_pipeline_in_background,
+        args=(source_id,),
+        daemon=True,
+        name=f"pipeline-retry-{source_id}",
+    )
+    thread.start()
+    logger.info("[Retry] Relaunched pipeline for source %s", source_id)
+
+    return _build_status_response(source, db)
 
 
 @router.get(
@@ -258,7 +367,7 @@ def list_sources(
         .order_by(Source.created_at.desc())
         .all()
     )
-    return [_build_source_response(s) for s in sources]
+    return [_build_source_response(s, db) for s in sources]
 
 
 @router.get(
@@ -282,7 +391,7 @@ def get_source(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Source not found"
         )
-    return _build_source_response(source)
+    return _build_source_response(source, db)
 
 
 @router.get(

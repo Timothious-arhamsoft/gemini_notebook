@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Citation, GroqUsage, UploadFile } from '../../../../types'
 import type { DocumentAnalysisResult } from '../../../../api/sources'
 import { citationSelectionKey, formatCitationMeta } from '../../../../utils/assistantContent'
+import { DocumentProcessingStatus } from '../DocumentProcessingStatus'
 
 interface Props {
   activeCitation: Citation | null
@@ -9,6 +10,7 @@ interface Props {
   uploads: UploadFile[]
   logs: string[]
   latestAiUsage?: GroqUsage | null
+  onRetry?: (sourceId: string) => void
 }
 
 type Tone = 'info' | 'success' | 'error'
@@ -32,18 +34,6 @@ function parseLog(raw: string): Omit<Entry, 'count'> {
   }
 
   return { time, message, tone }
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  ready: 'Ready',
-  completed: 'Ready',
-  uploading: 'Uploading…',
-  processing: 'Extracting…',
-  analyzing: 'Analyzing…',
-  chunking: 'Chunking…',
-  embedding: 'Embedding…',
-  error: 'Failed',
-  failed: 'Failed',
 }
 
 const HISTORY_LIMIT = 20
@@ -98,6 +88,51 @@ function AnalysisPanel({ analysis }: { analysis: DocumentAnalysisResult }) {
 
         <span className="studio-sidebar__analysis-label">Paragraphs</span>
         <span className="studio-sidebar__analysis-value">{fmt(analysis.paragraph_count)}</span>
+
+        {analysis.heading_count != null && (
+          <>
+            <span className="studio-sidebar__analysis-label">Headings</span>
+            <span className="studio-sidebar__analysis-value">{fmt(analysis.heading_count)}</span>
+          </>
+        )}
+
+        {analysis.section_count != null && (
+          <>
+            <span className="studio-sidebar__analysis-label">Sections</span>
+            <span className="studio-sidebar__analysis-value">{fmt(analysis.section_count)}</span>
+          </>
+        )}
+      </div>
+
+      <div className="studio-sidebar__analysis-divider" />
+
+      <div className="studio-sidebar__analysis-section-title">Paragraph distribution</div>
+      <div className="studio-sidebar__analysis-grid">
+        <span className="studio-sidebar__analysis-label">Median</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.median_paragraph_chars)}</span>
+
+        <span className="studio-sidebar__analysis-label">P75</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.p75_paragraph_chars)}</span>
+
+        <span className="studio-sidebar__analysis-label">P90</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.p90_paragraph_chars)}</span>
+
+        <span className="studio-sidebar__analysis-label">P95</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.p95_paragraph_chars)}</span>
+
+        <span className="studio-sidebar__analysis-label">Max</span>
+        <span className="studio-sidebar__analysis-value">{fmt(analysis.max_paragraph_chars)}</span>
+      </div>
+
+      <div className="studio-sidebar__analysis-divider" />
+
+      <div className="studio-sidebar__analysis-recommendation">
+        <span className="studio-sidebar__analysis-strategy">
+          Strategy: {analysis.recommended_strategy}
+        </span>
+        <span className="studio-sidebar__analysis-chunk">
+          Chunk size: <strong>~{fmt(analysis.recommended_chunk_size)} chars</strong>
+        </span>
       </div>
     </div>
   )
@@ -140,7 +175,14 @@ function UsagePanel({ usage }: { usage: GroqUsage }) {
   )
 }
 
-export function StudioSidebar({ activeCitation, onClearCitation, uploads, logs, latestAiUsage }: Props) {
+export function StudioSidebar({
+  activeCitation,
+  onClearCitation,
+  uploads,
+  logs,
+  latestAiUsage,
+  onRetry,
+}: Props) {
   const [showHistory, setShowHistory] = useState(false)
   const [expandedDoc, setExpandedDoc] = useState<string | null>(null)
 
@@ -309,11 +351,13 @@ export function StudioSidebar({ activeCitation, onClearCitation, uploads, logs, 
                       <span className="studio-sidebar__resource-name" title={u.file.name}>
                         {u.file.name}
                       </span>
-                      <span className={`studio-sidebar__status studio-sidebar__status--${u.status}`}>
-                        <span className="studio-sidebar__dot" aria-hidden="true" />
-                        {STATUS_LABEL[u.status] ?? u.status}
-                      </span>
                     </div>
+                    <DocumentProcessingStatus
+                      upload={u}
+                      onRetry={onRetry}
+                      retryDisabled={!!u.retrying}
+                      compact
+                    />
 
                     {u.analysis && (
                       <button
@@ -322,7 +366,9 @@ export function StudioSidebar({ activeCitation, onClearCitation, uploads, logs, 
                         aria-expanded={isExpanded}
                         onClick={() => setExpandedDoc(isExpanded ? null : u.id)}
                       >
-                        <span className="studio-sidebar__analysis-toggle-label">Analysis {isExpanded ? '▲' : '▼'}</span>
+                        <span className="studio-sidebar__analysis-toggle-label">
+                          Analysis {isExpanded ? '▲' : '▼'}
+                        </span>
                       </button>
                     )}
 

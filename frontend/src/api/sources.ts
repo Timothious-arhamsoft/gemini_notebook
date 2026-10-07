@@ -40,6 +40,11 @@ export interface ApiSource {
   updated_at: string
   analysis?: DocumentAnalysisResult | null
   file_size?: number | null
+  processing_started_at?: string | null
+  processing_completed_at?: string | null
+  processing_failed_at?: string | null
+  processing_timings?: Record<string, number> | null
+  chunk_count?: number | null
 }
 
 export interface SourceStatusResponse {
@@ -50,6 +55,11 @@ export interface SourceStatusResponse {
   progress_label: string
   analysis?: DocumentAnalysisResult | null
   token_count?: number | null
+  processing_started_at?: string | null
+  processing_completed_at?: string | null
+  processing_failed_at?: string | null
+  processing_timings?: Record<string, number> | null
+  is_stale?: boolean
 }
 
 export async function uploadSourceApi(notebookId: string, file: File): Promise<ApiSource> {
@@ -76,6 +86,13 @@ export async function fetchSourcesApi(notebookId: string): Promise<ApiSource[]> 
 
 export async function deleteSourceApi(notebookId: string, sourceId: string): Promise<void> {
   await apiClient.delete(`/notebooks/${notebookId}/sources/${sourceId}`)
+}
+
+export async function retrySourceApi(notebookId: string, sourceId: string): Promise<SourceStatusResponse> {
+  const res = await apiClient.post<SourceStatusResponse>(
+    `/notebooks/${notebookId}/sources/${sourceId}/retry`,
+  )
+  return res.data
 }
 
 export function getSourceFileUrl(notebookId: string, sourceId: string): string {

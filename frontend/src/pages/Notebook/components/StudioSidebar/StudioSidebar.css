@@ -212,9 +212,10 @@
 
 .studio-sidebar__resource-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
+  flex-wrap: wrap;
 }
 
 .studio-sidebar__resource-name {
@@ -228,27 +229,70 @@
   text-overflow: ellipsis;
 }
 
-.studio-sidebar__status {
+/* Document processing status (timer + retry) */
+.doc-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  max-width: 100%;
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--fg-muted);
 }
 
-.studio-sidebar__status .studio-sidebar__dot {
-  margin-top: 0;
+.doc-status__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--st-progress, #f59e0b);
 }
 
-.studio-sidebar__status--ready .studio-sidebar__dot { background: var(--st-success); }
-.studio-sidebar__status--error .studio-sidebar__dot { background: var(--st-error); }
+.doc-status--ready .doc-status__dot { background: var(--st-success, #22c55e); }
+.doc-status--failed .doc-status__dot { background: var(--st-error, #ef4444); }
+.doc-status--stale .doc-status__dot { background: var(--st-error, #f59e0b); }
 
-.studio-sidebar__status--uploading .studio-sidebar__dot,
-.studio-sidebar__status--processing .studio-sidebar__dot {
-  background: var(--st-progress);
+.doc-status--uploading .doc-status__dot,
+.doc-status--analyzing .doc-status__dot,
+.doc-status--chunking .doc-status__dot,
+.doc-status--embedding .doc-status__dot,
+.doc-status--saving .doc-status__dot {
   animation: studio-pulse 1.2s ease-in-out infinite;
+}
+
+.doc-status__text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.doc-status__retry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  margin: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-muted);
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.doc-status__retry:hover:not(:disabled),
+.doc-status__retry:focus-visible {
+  opacity: 1;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  outline: none;
+}
+
+.doc-status__retry:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 @keyframes studio-pulse {
@@ -477,5 +521,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .studio-sidebar__status .studio-sidebar__dot { animation: none !important; }
+  .doc-status__dot { animation: none !important; }
 }

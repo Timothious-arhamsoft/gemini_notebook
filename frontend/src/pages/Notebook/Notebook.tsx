@@ -1,9 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { notebooksApi } from '../../api/notebooks'
-import { uploadSourceApi, fetchSourcesApi, deleteSourceApi, fetchSourceStatusApi } from '../../api/sources'
+import {
+  uploadSourceApi,
+  fetchSourcesApi,
+  deleteSourceApi,
+  fetchSourceStatusApi,
+  retrySourceApi,
+} from '../../api/sources'
 import { fetchChatMessagesApi, mapApiChatMessage, sendChatMessageApi } from '../../api/chat'
 import { citationSelectionKey } from '../../utils/assistantContent'
+import {
+  ACTIVE_PROCESSING_STATUSES,
+  applyStatusToUpload,
+  mapApiSourceToUpload,
+} from '../../utils/sourceProcessing'
+import { logsForStatusTransition, type PollLogState } from './sourceActivityLog'
 import type { GroqUsage } from '../../types'
 import { WorkspaceHeader } from './components/WorkspaceHeader/WorkspaceHeader'
 import { SourcesSidebar } from './components/SourcesSidebar/SourcesSidebar'
@@ -12,13 +24,15 @@ import { ChatMessage } from './components/ChatMessage/ChatMessage'
 import { ChatInput } from './components/ChatInput/ChatInput'
 import { UploadModal } from './components/UploadModal/UploadModal'
 import { Spinner } from '../../components/Spinner'
-import type { ChatMessage as ChatMessageType, Citation, Notebook, UploadFile, UploadStatus } from '../../types'
+import type { ChatMessage as ChatMessageType, Citation, Notebook, UploadFile } from '../../types'
 import './Notebook.css'
 import './components/StudioSidebar/StudioSidebar.css'
 
 const UNTITLED = 'Untitled'
 
-/** Derive singular/plural source count label */
+/** Once per notebook id per browser session — survives StrictMode remounts. */
+const activityRestoredNotebooks = new Set<string>()
+
 function sourceCountLabel(n: number) {
   return n === 1 ? '1 source' : `${n} sources`
 }
@@ -36,14 +50,13 @@ export function NotebookPage() {
   const [hasAutoOpenedModal, setHasAutoOpenedModal] = useState(false)
   const [selectedViewFile, setSelectedViewFile] = useState<UploadFile | null>(null)
 
-  // Track activity logs for the right sidebar studio
   const [logs, setLogs] = useState<string[]>([])
-  // Active citation detail view
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null)
   const [latestAiUsage, setLatestAiUsage] = useState<GroqUsage | null>(null)
 
-  // Track whether the user has manually set the title
   const userHasRenamedRef = useRef(false)
+  const pollLogStateRef = useRef<Map<string, PollLogState>>(new Map())
+  const activePollsRef = useRef<Set<string>>(new Set())
 
   const [messages, setMessages] = useState<ChatMessageType[]>([])
   const [sending, setSending] = useState(false)
@@ -56,10 +69,85 @@ export function NotebookPage() {
     setLogs(prev => [`[${timestamp}] ${message}`, ...prev])
   }, [])
 
-  // 1. Fetch notebook, sources & chat history
+  const stopPolling = useCallback((sourceId: string) => {
+    activePollsRef.current.delete(sourceId)
+  }, [])
+
+  const pollSourceUntilDone = useCallback(
+    async (notebookId: string, sourceId: string, fileName: string) => {
+      if (activePollsRef.current.has(sourceId)) return
+      activePollsRef.current.add(sourceId)
+
+      let logState = pollLogStateRef.current.get(sourceId)
+      if (!logState) {
+        logState = { lastStatus: '', loggedStages: new Set() }
+        pollLogStateRef.current.set(sourceId, logState)
+      }
+
+      const maxAttempts = 150 // ~5 min at 2s
+      try {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          if (!activePollsRef.current.has(sourceId)) return
+
+          if (attempt > 0) {
+            await new Promise(r => setTimeout(r, 2000))
+          }
+          if (!activePollsRef.current.has(sourceId)) return
+
+          try {
+            const statusRes = await fetchSourceStatusApi(notebookId, sourceId)
+            const prevStatus = logState.lastStatus
+            const nextStatus = statusRes.status
+
+            setUploads(prev =>
+              prev.map(u =>
+                u.id === sourceId ? applyStatusToUpload({ ...u, retrying: false }, statusRes) : u,
+              ),
+            )
+
+            if (nextStatus !== prevStatus) {
+              const stageLogs = logsForStatusTransition(
+                fileName,
+                prevStatus,
+                nextStatus,
+                statusRes,
+                logState,
+              )
+              stageLogs.forEach(msg => addLog(msg))
+            } else {
+              logState.lastStatus = nextStatus
+            }
+
+            if (
+              nextStatus === 'completed' ||
+              nextStatus === 'ready' ||
+              nextStatus === 'failed' ||
+              nextStatus === 'error'
+            ) {
+              return
+            }
+
+            // Stale: keep polling lightly but surface retry via is_stale on uploads
+            if (statusRes.is_stale) {
+              // Continue until terminal or user retries (retry cancels this poll)
+            }
+          } catch (err) {
+            console.error(`Polling status error for ${fileName}:`, err)
+          }
+        }
+      } finally {
+        activePollsRef.current.delete(sourceId)
+      }
+    },
+    [addLog],
+  )
+
+  // 1. Fetch notebook, sources & chat history — restore activity once per session
   useEffect(() => {
     if (!id) return
+    let cancelled = false
     setLoading(true)
+    setError(null)
 
     Promise.all([
       notebooksApi.get(id),
@@ -67,45 +155,39 @@ export function NotebookPage() {
       fetchChatMessagesApi(id).catch(() => []),
     ])
       .then(([data, existingSources, existingChatMessages]) => {
+        if (cancelled) return
+
         setNotebook(data)
         if (data.title && data.title !== UNTITLED) {
           userHasRenamedRef.current = true
         }
         document.title = `${data.title} - NoteGenio`
 
-        if (existingSources.length > 0) {
-          const loadedUploads: UploadFile[] = existingSources.map(s => {
-            const isDone = s.status === 'completed' || s.status === 'ready'
-            const isErr = s.status === 'error' || s.status === 'failed'
-            return {
-              id: s.id,
-              file: new File([], s.title || 'document'),
-              status: isDone ? 'ready' : isErr ? 'error' : (s.status as UploadStatus),
-              progress: 100,
-              analysis: s.analysis ?? null,
-              content_text: s.content_text,
-              file_size: s.file_size ?? s.analysis?.total_characters ?? 0,
-            }
-          })
-          setUploads(loadedUploads)
-          addLog(`Loaded ${existingSources.length} existing document resources from database.`)
+        const loadedUploads = existingSources.map(mapApiSourceToUpload)
+        setUploads(loadedUploads)
 
-          // Emit analysis activity log for restored documents if present
-          existingSources.forEach(s => {
-            if (s.analysis && !s.analysis.error) {
-              const chars = s.analysis.total_characters.toLocaleString()
-              const words = s.analysis.total_words.toLocaleString()
-              const chunkSize = s.analysis.recommended_chunk_size
-              const pageInfo = s.analysis.page_count ? `, Pages: ${s.analysis.page_count}` : ''
-              addLog(`[ANALYSIS] Restored ${s.title} — ${chars} chars, ${words} words${pageInfo}. Rec. chunk: ~${chunkSize} chars`)
-            }
-          })
-        } else {
-          addLog('Notebook initialized. No existing sources found.')
+        // Activity restoration: one summary line, once per notebook per session.
+        // Do NOT emit per-document "[ANALYSIS] Restored …" (that caused duplicates).
+        if (!activityRestoredNotebooks.has(id)) {
+          activityRestoredNotebooks.add(id)
+          if (existingSources.length > 0) {
+            addLog(`Loaded ${existingSources.length} existing document resources`)
+          } else {
+            addLog('Notebook initialized. No existing sources found.')
+          }
         }
 
+        // Resume polling only for sources still processing — never re-ingest Ready docs.
+        loadedUploads.forEach(u => {
+          if (ACTIVE_PROCESSING_STATUSES.has(u.status) && !u.id.startsWith('temp-')) {
+            void pollSourceUntilDone(id, u.id, u.file.name)
+          }
+        })
+
         if (existingChatMessages.length > 0) {
-          const loadedMessages: ChatMessageType[] = existingChatMessages.map(m => mapApiChatMessage(m))
+          const loadedMessages: ChatMessageType[] = existingChatMessages.map(m =>
+            mapApiChatMessage(m),
+          )
           setMessages(loadedMessages)
           const lastAssistant = [...loadedMessages].reverse().find(m => m.role === 'assistant')
           if (lastAssistant?.usage) {
@@ -114,11 +196,20 @@ export function NotebookPage() {
         }
       })
       .catch(err => {
+        if (cancelled) return
         console.error('Failed to load notebook:', err)
         setError('Notebook not found or accessible.')
       })
-      .finally(() => setLoading(false))
-  }, [id, addLog])
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+      // Stop polls belonging to this mount; StrictMode remount starts fresh polls if needed.
+      activePollsRef.current.clear()
+    }
+  }, [id, addLog, pollSourceUntilDone])
 
   // 2. Sync document.title when notebook title changes
   useEffect(() => {
@@ -140,177 +231,155 @@ export function NotebookPage() {
     if (!notebook || !id) return
     const label = sourceCountLabel(uploads.length)
     if (notebook.description === label) return
-    setNotebook(prev => prev ? { ...prev, description: label } : prev)
+    setNotebook(prev => (prev ? { ...prev, description: label } : prev))
     notebooksApi.update(id, { description: label }).catch(() => {})
   }, [uploads.length, id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Scroll to bottom on new messages
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
-  // Handle uploading files via FastAPI backend
-  const handleAddFiles = useCallback((files: File[]) => {
-    if (!id) return
+  const handleAddFiles = useCallback(
+    (files: File[]) => {
+      if (!id) return
 
-    // If this is the first upload and the notebook is still Untitled,
-    // use the first uploaded file's name as the notebook title.
-    const isFirstUpload =
-      uploads.length === 0 &&
-      notebook?.title === UNTITLED &&
-      !userHasRenamedRef.current
+      const isFirstUpload =
+        uploads.length === 0 && notebook?.title === UNTITLED && !userHasRenamedRef.current
 
-    if (isFirstUpload && files.length > 0) {
-      const firstFile = files[0]
-
-      // Remove the file extension (.pdf, .txt, .md, etc.)
-      const newTitle = firstFile.name
-        .replace(/\.[^/.]+$/, '')
-        .trim()
-
-      if (newTitle) {
-        // Update the UI immediately
-        setNotebook(prev =>
-          prev ? { ...prev, title: newTitle } : prev
-        )
-
-        // Update browser tab title
-        document.title = `${newTitle} - NoteGenio`
-
-        // Persist the notebook title in the backend
-        notebooksApi.update(id, { title: newTitle }).catch(err => {
-          console.error('Failed to update notebook title:', err)
-        })
-      }
-    }
-
-    files.forEach(file => {
-      const tempId = Math.random().toString(36).substring(2, 9)
-
-      const newUpload: UploadFile = {
-        id: tempId,
-        file,
-        status: 'uploading',
-        progress: 30,
+      if (isFirstUpload && files.length > 0) {
+        const newTitle = files[0].name.replace(/\.[^/.]+$/, '').trim()
+        if (newTitle) {
+          setNotebook(prev => (prev ? { ...prev, title: newTitle } : prev))
+          document.title = `${newTitle} - NoteGenio`
+          notebooksApi.update(id, { title: newTitle }).catch(err => {
+            console.error('Failed to update notebook title:', err)
+          })
+        }
       }
 
-      setUploads(prev => [...prev, newUpload])
-      addLog(`[INGESTION] Uploading ${file.name}...`)
+      files.forEach(file => {
+        const tempId = `temp-${Math.random().toString(36).substring(2, 9)}`
 
-      uploadSourceApi(id, file)
-        .then(apiSource => {
-          setUploads(prev =>
-            prev.map(u =>
-              u.id === tempId
-                ? {
-                    id: apiSource.id,
-                    file,
-                    status: (apiSource.status as UploadStatus) || 'processing',
-                    progress: 50,
-                    analysis: apiSource.analysis ?? null,
-                  }
-                : u
+        const newUpload: UploadFile = {
+          id: tempId,
+          file,
+          status: 'uploading',
+          progress: 30,
+          processing_started_at: new Date().toISOString(),
+        }
+
+        setUploads(prev => [...prev, newUpload])
+        addLog(`[INGESTION] Uploading ${file.name}…`)
+
+        uploadSourceApi(id, file)
+          .then(apiSource => {
+            const mapped = mapApiSourceToUpload({
+              ...apiSource,
+              title: file.name,
+            })
+            mapped.file = file
+            mapped.progress = 50
+
+            setUploads(prev => prev.map(u => (u.id === tempId ? mapped : u)))
+            addLog(`[INGESTION] Saved ${file.name}. Starting runtime analysis & ingestion…`)
+
+            pollLogStateRef.current.set(apiSource.id, {
+              lastStatus: apiSource.status,
+              loggedStages: new Set(),
+            })
+            void pollSourceUntilDone(id, apiSource.id, file.name)
+          })
+          .catch(err => {
+            console.error(`Upload error for ${file.name}:`, err)
+            setUploads(prev =>
+              prev.map(u =>
+                u.id === tempId
+                  ? { ...u, status: 'error', error: err.message, processing_failed_at: new Date().toISOString() }
+                  : u,
+              ),
             )
-          )
+            addLog(
+              `[ERROR] File upload failed for ${file.name}: ${
+                err.response?.data?.detail || err.message
+              }`,
+            )
+          })
+      })
+    },
+    [id, addLog, uploads.length, notebook?.title, pollSourceUntilDone],
+  )
 
-          addLog(`[INGESTION] Saved ${file.name}. Starting runtime analysis & ingestion pipeline...`)
+  const handleRetrySource = useCallback(
+    async (sourceId: string) => {
+      if (!id || sourceId.startsWith('temp-')) return
 
-          // Poll pipeline progress until completion or error
-          const pollStatus = async () => {
-            let lastStatus: string = apiSource.status
-            const maxAttempts = 60
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
-              await new Promise(r => setTimeout(r, 1200))
-              try {
-                const statusRes = await fetchSourceStatusApi(id, apiSource.id)
-                const newStatus = statusRes.status
+      const upload = uploads.find(u => u.id === sourceId)
+      const fileName = upload?.file.name ?? 'document'
 
-                if (newStatus !== lastStatus || attempt === 0) {
-                  lastStatus = newStatus
-                  setUploads(prev =>
-                    prev.map(u =>
-                      u.id === apiSource.id || u.id === tempId
-                        ? {
-                            ...u,
-                            id: apiSource.id,
-                            status: newStatus === 'completed' ? 'ready' : (newStatus as UploadStatus),
-                            analysis: statusRes.analysis ?? u.analysis,
-                          }
-                        : u
-                    )
-                  )
-
-                  if (newStatus === 'analyzing') {
-                    addLog(`[ANALYSIS] Analyzing layout and text density for ${file.name}...`)
-                  } else if (newStatus === 'chunking') {
-                    const recChunk = statusRes.analysis?.recommended_chunk_size
-                    const chunkInfo = recChunk ? ` (recommended chunk size: ~${recChunk} chars)` : ''
-                    addLog(`[CHUNKING] Splitting ${file.name} into recursive text chunks${chunkInfo}...`)
-                  } else if (newStatus === 'embedding') {
-                    addLog(`[EMBEDDING] Generating 384-dim BGE embeddings for chunks of ${file.name}...`)
-                  } else if (newStatus === 'completed' || newStatus === 'ready') {
-                    const analysis = statusRes.analysis
-                    if (analysis && !analysis.error) {
-                      const chars = analysis.total_characters.toLocaleString()
-                      const words = analysis.total_words.toLocaleString()
-                      const chunkSize = analysis.recommended_chunk_size
-                      const pageInfo = analysis.page_count ? `, Pages: ${analysis.page_count}` : ''
-                      addLog(
-                        `[ANALYSIS] ${file.name} — ${chars} chars, ${words} words${pageInfo}. Rec. chunk: ~${chunkSize} chars`
-                      )
-                    }
-                    addLog(
-                      `[SUCCESS] Runtime RAG pipeline complete for ${file.name}: ${statusRes.chunk_count} chunks embedded & stored in pgvector.`
-                    )
-                    return
-                  } else if (newStatus === 'failed' || newStatus === 'error') {
-                    addLog(
-                      `[ERROR] Document ingestion failed for ${file.name}: ${statusRes.error_message || 'Pipeline error'}`
-                    )
-                    return
-                  }
-                }
-              } catch (err) {
-                console.error(`Polling status error for ${file.name}:`, err)
+      setUploads(prev =>
+        prev.map(u =>
+          u.id === sourceId
+            ? {
+                ...u,
+                retrying: true,
+                status: 'processing',
+                is_stale: false,
+                error: undefined,
+                processing_started_at: new Date().toISOString(),
+                processing_completed_at: null,
+                processing_failed_at: null,
+                processing_timings: null,
               }
-            }
-          }
+            : u,
+        ),
+      )
+      addLog(`[RETRY] Retrying processing for ${fileName}…`)
 
-          pollStatus()
-        })
-        .catch(err => {
-          console.error(`Upload error for ${file.name}:`, err)
+      stopPolling(sourceId)
+      pollLogStateRef.current.set(sourceId, { lastStatus: '', loggedStages: new Set() })
 
-          setUploads(prev =>
-            prev.map(u =>
-              u.id === tempId
-                ? {
-                    ...u,
-                    status: 'error',
-                    error: err.message,
-                  }
-                : u
-            )
-          )
+      try {
+        const statusRes = await retrySourceApi(id, sourceId)
+        setUploads(prev =>
+          prev.map(u =>
+            u.id === sourceId ? applyStatusToUpload({ ...u, retrying: true }, statusRes) : u,
+          ),
+        )
+        void pollSourceUntilDone(id, sourceId, fileName)
+      } catch (err: unknown) {
+        const detail =
+          (err as { response?: { data?: { detail?: string } }; message?: string })?.response?.data
+            ?.detail ||
+          (err as { message?: string })?.message ||
+          'Retry failed'
+        setUploads(prev =>
+          prev.map(u =>
+            u.id === sourceId
+              ? { ...u, retrying: false, status: 'error', error: String(detail) }
+              : u,
+          ),
+        )
+        addLog(`[ERROR] ${fileName} · Retry failed · ${detail}`)
+      }
+    },
+    [id, uploads, addLog, stopPolling, pollSourceUntilDone],
+  )
 
-          addLog(
-            `[ERROR] File upload failed for ${file.name}: ` +
-            `${err.response?.data?.detail || err.message}`
-          )
-        })
-    })
-  }, [id, addLog, uploads.length, notebook?.title])
-
-  const handleRemoveFile = useCallback((fileId: string) => {
-    if (id) {
-      deleteSourceApi(id, fileId).catch(err => console.error('Failed to delete source:', err))
-    }
-    setUploads(prev => prev.filter(u => u.id !== fileId))
-    if (selectedViewFile?.id === fileId) {
-      setSelectedViewFile(null)
-    }
-    addLog(`Resource ${fileId} removed.`)
-  }, [id, selectedViewFile?.id, addLog])
+  const handleRemoveFile = useCallback(
+    (fileId: string) => {
+      stopPolling(fileId)
+      pollLogStateRef.current.delete(fileId)
+      if (id) {
+        deleteSourceApi(id, fileId).catch(err => console.error('Failed to delete source:', err))
+      }
+      setUploads(prev => prev.filter(u => u.id !== fileId))
+      if (selectedViewFile?.id === fileId) {
+        setSelectedViewFile(null)
+      }
+      addLog(`Resource removed.`)
+    },
+    [id, selectedViewFile?.id, addLog, stopPolling],
+  )
 
   const handleTitleChange = (newTitle: string) => {
     if (!notebook || !id) return
@@ -323,12 +392,11 @@ export function NotebookPage() {
     if (!id) return
     const trimmed = finalTitle.trim() || UNTITLED
     if (trimmed !== notebook?.title) {
-      setNotebook(prev => prev ? { ...prev, title: trimmed } : prev)
+      setNotebook(prev => (prev ? { ...prev, title: trimmed } : prev))
     }
     notebooksApi.update(id, { title: trimmed }).catch(() => {})
   }
 
-  // Handle sending chat message
   const handleSendMessage = async (text: string) => {
     const trimmed = text.trim()
     if (!trimmed || sending || !id) return
@@ -359,20 +427,31 @@ export function NotebookPage() {
         addLog(`[RETRIEVAL] ${assistantMsg.retrieved_evidence.length} relevant chunks retrieved`)
       }
       if (assistantMsg?.citations?.length) {
-        addLog(`[GENERATION] ${assistantMsg.citations.length} citation${assistantMsg.citations.length === 1 ? '' : 's'} in answer`)
+        addLog(
+          `[GENERATION] ${assistantMsg.citations.length} citation${
+            assistantMsg.citations.length === 1 ? '' : 's'
+          } in answer`,
+        )
       }
       if (assistantMsg?.usage) {
         setLatestAiUsage(assistantMsg.usage)
         const total = assistantMsg.usage.total_tokens
         addLog(
-          `[GENERATION] Model response complete${total != null ? ` · ${total.toLocaleString()} tokens` : ''}`,
+          `[GENERATION] Model response complete${
+            total != null ? ` · ${total.toLocaleString()} tokens` : ''
+          }`,
         )
       } else {
         addLog('[ASSISTANT ANSWER] Response saved to database.')
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to send chat message:', err)
-      addLog(`[ERROR] Failed to save chat message: ${err?.response?.data?.detail || err.message}`)
+      const detail =
+        (err as { response?: { data?: { detail?: string } }; message?: string })?.response?.data
+          ?.detail ||
+        (err as { message?: string })?.message ||
+        'Unknown error'
+      addLog(`[ERROR] Failed to save chat message: ${detail}`)
     } finally {
       setSending(false)
     }
@@ -400,14 +479,13 @@ export function NotebookPage() {
   }
 
   const suggestedQuestions = [
-    "Summarize the key points from my uploaded documents.",
-    "What are the main takeaways?",
-    "Find specific references to my query.",
+    'Summarize the key points from my uploaded documents.',
+    'What are the main takeaways?',
+    'Find specific references to my query.',
   ]
 
   return (
     <div className="notebook-workspace">
-      {/* 1. Header */}
       <WorkspaceHeader
         title={notebook.title}
         description={notebook.description ?? sourceCountLabel(uploads.length)}
@@ -415,7 +493,6 @@ export function NotebookPage() {
         onTitleBlur={handleTitleBlur}
       />
 
-      {/* 2. Mobile Tab Bar */}
       <div className="nb-tabs" role="tablist" aria-label="Notebook sections">
         <button
           role="tab"
@@ -424,8 +501,8 @@ export function NotebookPage() {
           onClick={() => setActiveTab('sources')}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
           </svg>
           Sources
           {uploads.length > 0 && <span className="nb-tabs__badge">{uploads.length}</span>}
@@ -438,26 +515,27 @@ export function NotebookPage() {
           onClick={() => setActiveTab('chat')}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
           Chat
           {messages.length > 0 && <span className="nb-tabs__badge">{messages.length}</span>}
         </button>
       </div>
 
-      {/* 3. Main Workspace Layout */}
       <div className="notebook-workspace__body">
-        {/* Left Panel: Sources Sidebar */}
         <SourcesSidebar
           uploads={uploads}
           onRemove={handleRemoveFile}
-          onOpenUploadModal={() => { setShowUploadModal(true); setActiveTab('sources') }}
+          onRetry={handleRetrySource}
+          onOpenUploadModal={() => {
+            setShowUploadModal(true)
+            setActiveTab('sources')
+          }}
           activePreviewFile={selectedViewFile}
           onSelectFile={file => setSelectedViewFile(file)}
           activeTab={activeTab}
         />
 
-        {/* Center Panel: Chat Workspace */}
         <main className={`chat-workspace${activeTab === 'chat' ? ' chat-workspace--active-tab' : ''}`}>
           <div className="chat-workspace__messages">
             {messages.length === 0 ? (
@@ -465,14 +543,14 @@ export function NotebookPage() {
                 <div className="chat-workspace__empty-badge">
                   <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
                     <rect width="28" height="28" rx="8" fill="var(--accent)" />
-                    <path d="M8 8h8a6 6 0 0 1 0 12H8V8Z" fill="white" opacity="0.9"/>
+                    <path d="M8 8h8a6 6 0 0 1 0 12H8V8Z" fill="white" opacity="0.9" />
                   </svg>
                   <span>NoteGenio Assistant</span>
                 </div>
                 <h2>Chat with your sources</h2>
                 <p>
-                  Ask questions, summarize documents, or extract key information.
-                  Answers are grounded in your uploaded source files.
+                  Ask questions, summarize documents, or extract key information. Answers are grounded
+                  in your uploaded source files.
                 </p>
 
                 <div className="chat-workspace__suggestions">
@@ -511,30 +589,26 @@ export function NotebookPage() {
           </div>
 
           <div className="chat-workspace__input-container">
-            <ChatInput
-              onSend={handleSendMessage}
-              loading={sending}
-              disabled={sending}
-            />
+            <ChatInput onSend={handleSendMessage} loading={sending} disabled={sending} />
           </div>
         </main>
 
-        {/* Right Panel: Studio & Citation Sidebar */}
         <StudioSidebar
           activeCitation={activeCitation}
           onClearCitation={() => setActiveCitation(null)}
           uploads={uploads}
           logs={logs}
           latestAiUsage={latestAiUsage}
+          onRetry={handleRetrySource}
         />
       </div>
 
-      {/* 4. Upload Modal */}
       {showUploadModal && (
         <UploadModal
           uploads={uploads}
           onAdd={handleAddFiles}
           onRemove={handleRemoveFile}
+          onRetry={handleRetrySource}
           onClose={() => setShowUploadModal(false)}
         />
       )}

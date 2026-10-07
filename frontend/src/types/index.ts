@@ -72,6 +72,7 @@ export type UploadStatus =
   | 'ready'
   | 'completed'
   | 'error'
+  | 'failed'
 
 export interface UploadFile {
   id: string           // local temp id
@@ -82,6 +83,13 @@ export interface UploadFile {
   analysis?: import('../api/sources').DocumentAnalysisResult | null
   content_text?: string | null
   file_size?: number | null
+  processing_started_at?: string | null
+  processing_completed_at?: string | null
+  processing_failed_at?: string | null
+  processing_timings?: Record<string, number> | null
+  chunk_count?: number
+  is_stale?: boolean
+  retrying?: boolean
 }
 
 // ── Chat ─────────────────────────────────────────────────────

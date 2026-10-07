@@ -4,10 +4,12 @@ import { renderAsync } from 'docx-preview'
 import { getFileTypeConfig, formatFileSize } from '../SourceUpload'
 import { apiClient } from '../../../../api/client'
 import type { UploadFile } from '../../../../types'
+import { DocumentProcessingStatus } from '../DocumentProcessingStatus'
 
 interface Props {
   uploads: UploadFile[]
   onRemove: (id: string) => void
+  onRetry?: (id: string) => void
   onOpenUploadModal: () => void
   activePreviewFile?: UploadFile | null
   onSelectFile?: (file: UploadFile | null) => void
@@ -17,6 +19,7 @@ interface Props {
 export function SourcesSidebar({
   uploads,
   onRemove,
+  onRetry,
   onOpenUploadModal,
   activePreviewFile: externalPreviewFile,
   onSelectFile,
@@ -287,6 +290,12 @@ export function SourcesSidebar({
                   <span className="sources-sidebar__item-size">
                     {formatFileSize(item.file_size ?? item.file.size)}
                   </span>
+                  <DocumentProcessingStatus
+                    upload={item}
+                    onRetry={onRetry}
+                    retryDisabled={!!item.retrying}
+                    compact
+                  />
                 </div>
 
                 <div className="sources-sidebar__item-actions">
