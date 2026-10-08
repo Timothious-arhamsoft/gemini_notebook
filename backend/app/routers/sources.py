@@ -19,8 +19,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.database import get_db, SessionLocal
-from app.models import Notebook, Source, User, Chunk
+from app.db.database import get_db, SessionLocal
+from app.db.models import Notebook, Source, User, Chunk
 from app.rag.pipeline import run_runtime_ingestion_pipeline
 from app.rag.retrieval import retrieve_chunks, RetrievedChunk
 from app.routers.auth import get_current_user

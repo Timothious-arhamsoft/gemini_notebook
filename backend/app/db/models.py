@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
 
-from app.database import Base
+from app.db.database import Base
 
 
 class User(Base):
@@ -103,4 +103,3 @@ class Chunk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     source: Mapped["Source"] = relationship("Source", back_populates="chunks")
-

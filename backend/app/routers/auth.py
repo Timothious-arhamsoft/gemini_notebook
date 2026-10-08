@@ -25,8 +25,8 @@ from app.auth_validation import (
     validate_password,
     validate_username,
 )
-from app.database import get_db
-from app.models import Notebook, User
+from app.db.database import get_db
+from app.db.models import Notebook, User
 
 logger = logging.getLogger(__name__)
 

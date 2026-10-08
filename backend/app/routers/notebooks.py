@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models import Notebook, User
+from app.db.database import get_db
+from app.db.models import Notebook, User
 from app.routers.auth import get_current_user
 
 logger = logging.getLogger(__name__)

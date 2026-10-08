@@ -9,8 +9,8 @@ from unittest.mock import patch
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database import Base
-from app.models import ChatMessage, Notebook, Source, User
+from app.db.database import Base
+from app.db.models import ChatMessage, Notebook, Source, User
 from app.rag.generation import (
     build_retrieval_query,
     format_source_inventory,

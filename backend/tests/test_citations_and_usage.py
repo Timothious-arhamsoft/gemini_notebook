@@ -11,7 +11,7 @@ from app.rag.context import build_context
 from app.rag.pricing import MODEL_PRICING, build_usage_metadata, estimate_cost_usd
 from app.rag.retrieval import RetrievedChunk
 from app.routers.chat import _parse_source_refs, _to_chat_response
-from app.models import ChatMessage
+from app.db.models import ChatMessage
 
 
 def _sample_evidence():
@@ -222,4 +222,3 @@ def test_historical_message_without_usage_does_not_crash():
     assert response.citations is not None
     assert response.usage is None
     assert response.retrieved_evidence is None
-

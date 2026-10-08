@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models import ChatMessage, User
+from app.db.database import get_db
+from app.db.models import ChatMessage, User
 from app.rag.generation import load_conversation_history, run_rag_pipeline
 from app.routers.auth import get_current_user
 from app.routers.sources import _verify_notebook_access

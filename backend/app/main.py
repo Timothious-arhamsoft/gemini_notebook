@@ -12,8 +12,8 @@ from app.routers import auth, chat, health, notebooks, sources
 async def lifespan(app: FastAPI):
     # Startup
     print("🚀  NoteGenio API starting...")
-    from app import models
-    from app.database import Base, engine
+    from app.db import models
+    from app.db.database import Base, engine
     Base.metadata.create_all(bind=engine)
 
     # Ensure sources table has analysis column if database was created prior to column addition

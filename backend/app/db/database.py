@@ -3,6 +3,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import settings
 
+
 def _get_effective_db_url() -> str:
     db_url = settings.database_url
     if "@postgres:5432" in db_url:
