@@ -1,3 +1,5 @@
+
+import { BrandLogo } from '../../../../components/BrandLogo'
 import type { ChatMessage as ChatMessageType, Citation } from '../../../../types'
 import {
   buildCitationIndexMap,
@@ -44,10 +46,7 @@ export function ChatMessage({ message, activeCitationKey, onCitationClick }: Pro
         {isUser ? (
           'U'
         ) : (
-          <svg width="14" height="14" viewBox="0 0 28 28" fill="none" aria-hidden="true">
-            <rect width="28" height="28" rx="4" fill="var(--accent)" opacity="0.8" />
-            <path d="M7 7h8a6 6 0 0 1 0 12H7V7Z" fill="white" opacity="0.9" />
-          </svg>
+          <BrandLogo size={32} showText={false} />
         )}
       </div>
 

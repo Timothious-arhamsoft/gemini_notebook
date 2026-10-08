@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { BrandLogo } from '../../components/BrandLogo'
 import { notebooksApi } from '../../api/notebooks'
 import {
   uploadSourceApi,
@@ -541,10 +542,7 @@ export function NotebookPage() {
             {messages.length === 0 ? (
               <div className="chat-workspace__empty">
                 <div className="chat-workspace__empty-badge">
-                  <svg width="24" height="24" viewBox="0 0 28 28" fill="none">
-                    <rect width="28" height="28" rx="8" fill="var(--accent)" />
-                    <path d="M8 8h8a6 6 0 0 1 0 12H8V8Z" fill="white" opacity="0.9" />
-                  </svg>
+                  <BrandLogo size={32} showText={false} />
                   <span>NoteGenio Assistant</span>
                 </div>
                 <h2>Chat with your sources</h2>
