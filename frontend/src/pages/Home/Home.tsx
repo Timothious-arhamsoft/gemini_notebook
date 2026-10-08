@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Link } from 'react-router-dom'
+import { BrandLogo } from '../../components/BrandLogo'
 import { useAuth } from '../../contexts/AuthContext'
 import { useDayNightTheme } from '../../hooks/useDayNightTheme'
 import './Home.css'
@@ -144,36 +145,7 @@ export function Home() {
             onClick={handleHome}
             aria-label="Go to home page"
           >
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 28 28"
-              fill="none"
-              aria-hidden="true"
-            >
-              <rect
-                width="28"
-                height="28"
-                rx="8"
-                fill="var(--accent)"
-              />
-              <path
-                d="M8 8h8a6 6 0 0 1 0 12H8V8Z"
-                fill="white"
-                opacity="0.9"
-              />
-              <circle
-                cx="19"
-                cy="20"
-                r="2.5"
-                fill="white"
-                opacity="0.6"
-              />
-            </svg>
-
-            <span className="dash-header__logo-text">
-              NoteGenio
-            </span>
+            <BrandLogo size={22} textClassName="dash-header__logo-text" />
           </button>
         </div>
 

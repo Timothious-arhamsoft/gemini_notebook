@@ -1,4 +1,5 @@
 import { useNavigate } from 'react-router-dom'
+import { BrandLogo } from '../../../../components/BrandLogo'
 import { useAuth } from '../../../../contexts/AuthContext'
 import { useDayNightTheme } from '../../../../hooks/useDayNightTheme'
 
@@ -23,10 +24,7 @@ export function WorkspaceHeader({ title, description, onTitleChange, onTitleBlur
           </svg>
         </button>
         <div className="ws-header__logo">
-          <svg width="18" height="18" viewBox="0 0 28 28" fill="none">
-            <rect width="28" height="28" rx="8" fill="var(--accent)" />
-            <path d="M8 8h8a6 6 0 0 1 0 12H8V8Z" fill="white" opacity="0.9"/>
-          </svg>
+          <BrandLogo size={20} showText={false} />
         </div>
         <div className="ws-header__title-group">
           <input
