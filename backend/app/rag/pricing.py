@@ -10,6 +10,10 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
         "input_per_million": 0.15,
         "output_per_million": 0.60,
     },
+    "openai/gpt-oss-20b": {
+        "input_per_million": 0.075,
+        "output_per_million": 0.30,
+    },
 }
 
 

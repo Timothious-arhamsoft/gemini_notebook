@@ -46,6 +46,7 @@ function fmt(n: number | null | undefined): string {
 function formatModelLabel(model: string | null | undefined): string {
   if (!model) return 'AI model'
   if (model.includes('gpt-oss-120b')) return 'GPT-OSS 120B'
+  if (model.includes('gpt-oss-20b')) return 'GPT-OSS 20B'
   const short = model.split('/').pop() ?? model
   return short.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }

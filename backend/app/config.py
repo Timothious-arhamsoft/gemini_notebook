@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # Groq LLM
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
+    # Used when the primary model hits a daily/token rate limit (separate TPD quota).
+    groq_fallback_model: str = "openai/gpt-oss-20b"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

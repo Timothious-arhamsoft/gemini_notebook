@@ -3,11 +3,12 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from groq import Groq
+from groq import Groq, RateLimitError
 
 from app.config import settings
 from app.rag.citations import normalize_citation_markers
 from app.rag.pricing import build_usage_metadata
+from app.rag.rate_limit import parse_retry_after_minutes
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +16,14 @@ logger = logging.getLogger(__name__)
 # the current turn's retrieved excerpts (and so the model keeps citing anew).
 _HISTORY_SOURCE_MARKER_RE = re.compile(
     r"(?:\[Source\s+\d+\]|[【［]\s*Source\s+\d+\s*[】］])",
+    re.IGNORECASE,
+)
+
+# Capacity / transport failure replies must not be re-fed into the next prompt —
+# they inflate token use and make Groq TPD wait times longer on every retry.
+_CAPACITY_ASSISTANT_RE = re.compile(
+    r"I'm temporarily out of AI capacity|"
+    r"I couldn't generate a response right now",
     re.IGNORECASE,
 )
 
@@ -196,6 +205,25 @@ def _history_content_for_llm(content: str) -> str:
     return text.strip()
 
 
+def filter_history_for_llm(
+    conversation_history: Optional[Sequence[Dict[str, str]]],
+) -> List[Dict[str, str]]:
+    """
+    Drop capacity/error assistant turns (and the user turn that only got that reply)
+    so retries do not keep growing the prompt.
+    """
+    cleaned: List[Dict[str, str]] = []
+    for turn in conversation_history or []:
+        role = turn.get("role")
+        content = turn.get("content") or ""
+        if role == "assistant" and _CAPACITY_ASSISTANT_RE.search(content):
+            if cleaned and cleaned[-1].get("role") == "user":
+                cleaned.pop()
+            continue
+        cleaned.append(turn)
+    return cleaned
+
+
 def _build_user_content(query: str, document_context: Optional[str]) -> str:
     context = (document_context or "").strip()
     if context:
@@ -251,52 +279,80 @@ class GroqService:
         """
         client = self._get_client()
         target_model = model or settings.groq_model
+        history = filter_history_for_llm(conversation_history)
 
-        messages: List[Dict[str, str]] = [
-            {
-                "role": "system",
-                "content": _build_system_content(
-                    source_inventory=source_inventory,
-                    chat_model=target_model,
-                    embedding_model=embedding_model,
-                ),
-            }
-        ]
-
-        for turn in conversation_history or []:
-            role = turn.get("role")
-            content = _history_content_for_llm(turn.get("content") or "")
-            if role not in ("user", "assistant") or not content:
-                continue
-            messages.append({"role": role, "content": content})
-
-        messages.append(
-            {
-                "role": "user",
-                "content": _build_user_content(query, document_context),
-            }
-        )
-
-        logger.info(f"[Groq LLM] Requesting completion with model '{target_model}'...")
-        started = time.perf_counter()
-        try:
-            response = client.chat.completions.create(
-                model=target_model,
-                messages=messages,
-                temperature=0.2,
-                max_tokens=1024,
+        def _messages_for(chat_model: str) -> List[Dict[str, str]]:
+            built: List[Dict[str, str]] = [
+                {
+                    "role": "system",
+                    "content": _build_system_content(
+                        source_inventory=source_inventory,
+                        chat_model=chat_model,
+                        embedding_model=embedding_model,
+                    ),
+                }
+            ]
+            for turn in history:
+                role = turn.get("role")
+                content = _history_content_for_llm(turn.get("content") or "")
+                if role not in ("user", "assistant") or not content:
+                    continue
+                built.append({"role": role, "content": content})
+            built.append(
+                {
+                    "role": "user",
+                    "content": _build_user_content(query, document_context),
+                }
             )
-            latency_ms = (time.perf_counter() - started) * 1000
-            # Canonicalize markers so the frontend can turn them into clickable cites.
-            answer = normalize_citation_markers(
-                (response.choices[0].message.content or "").strip()
-            )
-            usage = _usage_from_response(response, target_model, latency_ms)
-            logger.info("[Groq LLM] Successfully received response from Groq API.")
-            return answer, usage
-        except Exception as err:
-            logger.error(f"[Groq LLM] Groq API call failed: {err}", exc_info=True)
-            raise
+            return built
+
+        models_to_try = [target_model]
+        fallback = (settings.groq_fallback_model or "").strip()
+        if fallback and fallback != target_model:
+            models_to_try.append(fallback)
+
+        last_err: Optional[Exception] = None
+        for index, active_model in enumerate(models_to_try):
+            messages = _messages_for(active_model)
+            logger.info(f"[Groq LLM] Requesting completion with model '{active_model}'...")
+            started = time.perf_counter()
+            try:
+                response = client.chat.completions.create(
+                    model=active_model,
+                    messages=messages,
+                    temperature=0.2,
+                    max_tokens=1024,
+                )
+                latency_ms = (time.perf_counter() - started) * 1000
+                # Canonicalize markers so the frontend can turn them into clickable cites.
+                answer = normalize_citation_markers(
+                    (response.choices[0].message.content or "").strip()
+                )
+                usage = _usage_from_response(response, active_model, latency_ms)
+                logger.info("[Groq LLM] Successfully received response from Groq API.")
+                return answer, usage
+            except RateLimitError as err:
+                last_err = err
+                has_next = index + 1 < len(models_to_try)
+                if has_next:
+                    next_model = models_to_try[index + 1]
+                    retry_after_minutes = parse_retry_after_minutes(str(err))
+                    logger.warning(
+                        "[Groq LLM] Rate limit on '%s' (retry in ~%s min); "
+                        "retrying with fallback '%s'.",
+                        active_model,
+                        retry_after_minutes,
+                        next_model,
+                    )
+                    continue
+                logger.error(f"[Groq LLM] Groq API call failed: {err}", exc_info=True)
+                raise
+            except Exception as err:
+                logger.error(f"[Groq LLM] Groq API call failed: {err}", exc_info=True)
+                raise
+
+        assert last_err is not None
+        raise last_err
 
     # Backward-compatible wrappers used by older tests/call sites.
     def generate_grounded_answer(

@@ -1,8 +1,7 @@
 import logging
 import uuid
 from typing import Any, Dict, List, Optional, Sequence
-import re
-from datetime import datetime, timedelta, timezone
+
 from sqlalchemy.orm import Session
 
 from app.models import ChatMessage, Source
@@ -10,6 +9,7 @@ from app.rag.citations import select_answer_citations
 from app.rag.context import build_context
 from app.rag.embedder import DEFAULT_MODEL_NAME
 from app.rag.llm import groq_service
+from app.rag.rate_limit import format_capacity_error
 from app.rag.retrieval import RetrievedChunk, retrieve_chunks
 
 logger = logging.getLogger(__name__)
@@ -115,28 +115,12 @@ def _empty_rag_result(answer: str, usage: Optional[Dict[str, Any]] = None) -> Di
     }
 
 def _format_llm_error(exc: Exception) -> str:
-    """Convert provider errors into user-friendly messages."""
+    """Convert provider errors into user-friendly messages (never raw API dumps)."""
     error_text = str(exc)
 
     # Groq/OpenAI-compatible 429 token/rate-limit error.
     if "429" in error_text or "rate_limit_exceeded" in error_text:
-        match = re.search(
-            r"try again in\s+([0-9]+(?:\.[0-9]+)?)m",
-            error_text,
-            re.IGNORECASE,
-        )
-
-        if match:
-            minutes = max(1, round(float(match.group(1))))
-            return (
-                "I'm temporarily out of AI capacity. "
-                f"Please try again in about {minutes} minutes."
-            )
-
-        return (
-            "I'm temporarily out of AI capacity. "
-            "Please try again in a few minutes."
-        )
+        return format_capacity_error(error_text)
 
     return (
         "I couldn't generate a response right now. "
