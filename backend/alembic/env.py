@@ -14,9 +14,9 @@ from sqlalchemy import engine_from_config, pool
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from app.config import settings
-from app.database import Base
+from app.db.database import Base
 # Import models so Base.metadata contains all tables
-import app.models  # noqa: F401
+import app.db.models  # noqa: F401
 
 config = context.config
 

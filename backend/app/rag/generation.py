@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
-from app.models import ChatMessage, Source
+from app.db.models import ChatMessage, Source
 from app.rag.citations import select_answer_citations
 from app.rag.context import build_context
 from app.rag.embedder import DEFAULT_MODEL_NAME

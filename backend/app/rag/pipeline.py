@@ -7,7 +7,7 @@ from typing import Any, Dict
 
 from sqlalchemy.orm import Session
 
-from app.models import Chunk, Source
+from app.db.models import Chunk, Source
 from app.rag.embedder import bge_embedder
 from app.rag.ingestion import ingestion_service
 from app.rag.splitter import split_text

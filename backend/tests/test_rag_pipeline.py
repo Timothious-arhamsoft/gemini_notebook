@@ -3,8 +3,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.database import Base
-from app.models import User, Notebook, Source, Chunk
+from app.db.database import Base
+from app.db.models import User, Notebook, Source, Chunk
 from app.rag.embedder import bge_embedder
 from app.rag.retrieval import retrieve_chunks, RetrievedChunk
 from app.rag.context import build_context

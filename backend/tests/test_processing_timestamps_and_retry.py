@@ -7,14 +7,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Chunk, Source, User, Notebook
+from app.db.models import Chunk, Source, User, Notebook
 from app.rag.pipeline import run_runtime_ingestion_pipeline
 from app.routers.sources import _is_stale_processing, STALE_PROCESSING_SECONDS
 
 
 @pytest.fixture
 def db_session():
-    from app.database import SessionLocal
+    from app.db.database import SessionLocal
 
     db = SessionLocal()
     try:

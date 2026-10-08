@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.models import Chunk, Source
+from app.db.models import Chunk, Source
 from app.rag.embedder import bge_embedder
 
 logger = logging.getLogger(__name__)
