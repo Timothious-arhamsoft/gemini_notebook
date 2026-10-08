@@ -204,7 +204,7 @@ export function Home() {
 
       <section className="home__hero">
         <span className="home__eyebrow">
-          AI-powered document workspace
+          Your personal knowledge workspace
         </span>
 
         <h1>
@@ -215,7 +215,7 @@ export function Home() {
 
         <p>
           Upload your sources, ask questions, and get answers
-          grounded exclusively in your own documents — with citations.
+          grounded exclusively in your own documents with citations.
         </p>
 
         <div className="home__actions">
