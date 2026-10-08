@@ -16,4 +16,8 @@ export const authApi = {
     const { data } = await apiClient.get<User>('/auth/me')
     return data
   },
+
+  delete: async (): Promise<void> => {
+    await apiClient.delete('/auth/me')
+  },
 }

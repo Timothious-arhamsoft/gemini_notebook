@@ -1,6 +1,9 @@
+import logging
 import os
+import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi import (
     APIRouter,
@@ -23,7 +26,12 @@ from app.auth_validation import (
     validate_username,
 )
 from app.database import get_db
-from app.models import User
+from app.models import Notebook, User
+
+logger = logging.getLogger(__name__)
+
+# Same base as notebooks/sources routers — DB rows and files are separate concerns
+STORAGE_DIR = Path(__file__).resolve().parent.parent.parent / "storage"
 
 
 router = APIRouter()
@@ -290,3 +298,37 @@ def me(
     """Return the currently authenticated user."""
 
     return current_user
+
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_me(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete the authenticated user (cascade), then remove notebook storage dirs."""
+    notebook_ids = [
+        row[0]
+        for row in db.query(Notebook.id)
+        .filter(Notebook.user_id == current_user.id)
+        .all()
+    ]
+
+    # 1) DB relationships (notebooks → sources/chunks/chat, refresh tokens, user)
+    db.delete(current_user)
+    db.commit()
+
+    # 2) Physical storage — cascade does not touch disk
+    for notebook_id in notebook_ids:
+        nb_storage_dir = STORAGE_DIR / "notebooks" / str(notebook_id)
+        if nb_storage_dir.is_dir():
+            try:
+                shutil.rmtree(nb_storage_dir)
+            except Exception as e:
+                logger.warning(
+                    "Could not remove notebook storage %s: %s",
+                    nb_storage_dir,
+                    e,
+                )

@@ -1,7 +1,8 @@
 import logging
 import uuid
 from typing import Any, Dict, List, Optional, Sequence
-
+import re
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models import ChatMessage, Source
@@ -113,6 +114,34 @@ def _empty_rag_result(answer: str, usage: Optional[Dict[str, Any]] = None) -> Di
         "usage": usage,
     }
 
+def _format_llm_error(exc: Exception) -> str:
+    """Convert provider errors into user-friendly messages."""
+    error_text = str(exc)
+
+    # Groq/OpenAI-compatible 429 token/rate-limit error.
+    if "429" in error_text or "rate_limit_exceeded" in error_text:
+        match = re.search(
+            r"try again in\s+([0-9]+(?:\.[0-9]+)?)m",
+            error_text,
+            re.IGNORECASE,
+        )
+
+        if match:
+            minutes = max(1, round(float(match.group(1))))
+            return (
+                "I'm temporarily out of AI capacity. "
+                f"Please try again in about {minutes} minutes."
+            )
+
+        return (
+            "I'm temporarily out of AI capacity. "
+            "Please try again in a few minutes."
+        )
+
+    return (
+        "I couldn't generate a response right now. "
+        "Please try again in a moment."
+    )
 
 def run_rag_pipeline(
     notebook_id: uuid.UUID,
@@ -175,16 +204,14 @@ def run_rag_pipeline(
             embedding_model=DEFAULT_MODEL_NAME,
         )
     except Exception as exc:
-        logger.error(f"[RAG Pipeline] Groq LLM generation failed: {exc}")
-        # Document-shaped fallback only when we had retrieval context but the LLM failed.
-        if context_str:
-            answer = f"Error generating LLM response: {str(exc)}"
-        else:
-            answer = (
-                "Hello! I'm the NoteGenio assistant. Ask me anything about your "
-                "uploaded documents, or ask what I can do."
-            )
-            return _empty_rag_result(answer, usage)
+        logger.error(
+            "[RAG Pipeline] Groq LLM generation failed",
+            exc_info=True,
+        )
+
+        answer = _format_llm_error(exc)
+
+        return _empty_rag_result(answer, usage)
 
     citations = select_answer_citations(answer, evidence_refs)
 
