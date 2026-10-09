@@ -2,15 +2,31 @@ import { useNavigate } from 'react-router-dom'
 import { BrandLogo } from '../../../../components/BrandLogo'
 import { useAuth } from '../../../../contexts/AuthContext'
 import { useDayNightTheme } from '../../../../hooks/useDayNightTheme'
+import type { NotebookTokenUsage } from '../../../../types'
 
 interface Props {
   title: string
   description?: string
+  tokenUsage: NotebookTokenUsage | null
   onTitleChange: (t: string) => void
   onTitleBlur?: (t: string) => void
 }
 
-export function WorkspaceHeader({ title, description, onTitleChange, onTitleBlur }: Props) {
+function formatTokenCount(value: number | null | undefined): string {
+  return value == null ? '—' : value.toLocaleString()
+}
+
+function formatCost(value: number | null | undefined): string {
+  return value == null ? 'Unavailable' : `$${value.toFixed(6)}`
+}
+
+export function WorkspaceHeader({
+  title,
+  description,
+  tokenUsage,
+  onTitleChange,
+  onTitleBlur,
+}: Props) {
   const navigate = useNavigate()
   const { logout } = useAuth()
   const { isDay, toggleTheme } = useDayNightTheme()
@@ -43,6 +59,32 @@ export function WorkspaceHeader({ title, description, onTitleChange, onTitleBlur
         </div>
       </div>
       <div className="ws-header__right">
+        <details className="ws-header__usage">
+          <summary aria-label="Notebook token usage">Token usage</summary>
+          <div className="ws-header__usage-popover">
+            <h4>Notebook consumption</h4>
+            {tokenUsage ? (
+              <dl>
+                <dt>Input tokens</dt>
+                <dd>{formatTokenCount(tokenUsage.input_tokens)}</dd>
+                <dt>Output tokens</dt>
+                <dd>{formatTokenCount(tokenUsage.output_tokens)}</dd>
+                <dt>Total tokens</dt>
+                <dd>{formatTokenCount(tokenUsage.total_tokens)}</dd>
+                <dt>Estimated cost</dt>
+                <dd>{formatCost(tokenUsage.estimated_cost_usd)}</dd>
+              </dl>
+            ) : (
+              <p>Usage data is unavailable.</p>
+            )}
+            {tokenUsage && tokenUsage.unpriced_request_count > 0 && (
+              <p className="ws-header__usage-note">
+                Pricing is unavailable for {tokenUsage.unpriced_request_count} response
+                {tokenUsage.unpriced_request_count === 1 ? '' : 's'}.
+              </p>
+            )}
+          </div>
+        </details>
         <button
           type="button"
           className="home__theme-toggle"

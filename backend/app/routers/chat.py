@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import ChatMessage, User
 from app.rag.generation import load_conversation_history, run_rag_pipeline
+from app.rag.pricing import estimate_cost_breakdown_usd
 from app.routers.auth import get_current_user
 from app.routers.sources import _verify_notebook_access
 
@@ -56,13 +57,30 @@ class CitationSchema(BaseModel):
 
 class UsageSchema(BaseModel):
     model: Optional[str] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
     prompt_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
     cached_tokens: Optional[int] = None
+    input_cost: Optional[float] = None
+    output_cost: Optional[float] = None
+    total_cost: Optional[float] = None
     estimated_cost_usd: Optional[float] = None
     request_id: Optional[str] = None
     latency_ms: Optional[float] = None
+
+
+class NotebookTokenUsageResponse(BaseModel):
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    input_cost: Optional[float]
+    output_cost: Optional[float]
+    total_cost: Optional[float]
+    estimated_cost_usd: Optional[float]
+    request_count: int
+    unpriced_request_count: int
 
 
 class ChatMessageCreate(BaseModel):
@@ -170,7 +188,110 @@ def _build_persisted_source_refs(
     }
 
 
+def _usage_number(usage: Dict[str, Any], *keys: str) -> Optional[float]:
+    for key in keys:
+        value = usage.get(key)
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number >= 0:
+            return number
+    return None
+
+
+def _aggregate_notebook_usage(messages: List[ChatMessage]) -> NotebookTokenUsageResponse:
+    input_tokens = 0
+    output_tokens = 0
+    input_cost = 0.0
+    output_cost = 0.0
+    total_cost = 0.0
+    request_count = 0
+    unpriced_request_count = 0
+    complete_cost_breakdown = True
+
+    for message in messages:
+        refs = message.source_refs
+        usage = refs.get("usage") if isinstance(refs, dict) else None
+        if not isinstance(usage, dict):
+            continue
+
+        request_count += 1
+        response_input = int(_usage_number(usage, "input_tokens", "prompt_tokens") or 0)
+        response_output = int(_usage_number(usage, "output_tokens", "completion_tokens") or 0)
+        input_tokens += response_input
+        output_tokens += response_output
+
+        response_input_cost = _usage_number(usage, "input_cost")
+        response_output_cost = _usage_number(usage, "output_cost")
+        response_total_cost = _usage_number(
+            usage, "total_cost", "estimated_cost_usd"
+        )
+
+        if response_input_cost is None or response_output_cost is None:
+            model = usage.get("model")
+            calculated = (
+                estimate_cost_breakdown_usd(model, response_input, response_output)
+                if isinstance(model, str)
+                else None
+            )
+            if calculated is not None:
+                response_input_cost = calculated["input_cost"]
+                response_output_cost = calculated["output_cost"]
+                response_total_cost = calculated["total_cost"]
+            elif response_total_cost is not None:
+                complete_cost_breakdown = False
+            else:
+                unpriced_request_count += 1
+                complete_cost_breakdown = False
+
+        if response_total_cost is not None:
+            total_cost += response_total_cost
+        if response_input_cost is not None and response_output_cost is not None:
+            input_cost += response_input_cost
+            output_cost += response_output_cost
+            if response_total_cost is None:
+                total_cost += response_input_cost + response_output_cost
+
+    rounded_total_cost = round(total_cost, 10) if unpriced_request_count == 0 else None
+    return NotebookTokenUsageResponse(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=input_tokens + output_tokens,
+        input_cost=round(input_cost, 10) if complete_cost_breakdown else None,
+        output_cost=round(output_cost, 10) if complete_cost_breakdown else None,
+        total_cost=rounded_total_cost,
+        estimated_cost_usd=rounded_total_cost,
+        request_count=request_count,
+        unpriced_request_count=unpriced_request_count,
+    )
+
+
 # ── Routes ────────────────────────────────────────────────────
+@router.get(
+    "/{notebook_id}/chat/usage",
+    response_model=NotebookTokenUsageResponse,
+)
+def get_notebook_token_usage(
+    notebook_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return cumulative LLM usage for assistant responses in this notebook."""
+    _verify_notebook_access(notebook_id, current_user, db)
+    messages = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.notebook_id == notebook_id,
+            ChatMessage.role == "assistant",
+        )
+        .all()
+    )
+    return _aggregate_notebook_usage(messages)
+
+
 @router.get(
     "/{notebook_id}/chat/messages",
     response_model=List[ChatMessageResponse],

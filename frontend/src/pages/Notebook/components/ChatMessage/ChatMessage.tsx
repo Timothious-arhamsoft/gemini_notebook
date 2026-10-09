@@ -1,6 +1,6 @@
 
 import { BrandLogo } from '../../../../components/BrandLogo'
-import type { ChatMessage as ChatMessageType, Citation } from '../../../../types'
+import type { ChatMessage as ChatMessageType, Citation, GroqUsage } from '../../../../types'
 import {
   buildCitationIndexMap,
   citationSelectionKey,
@@ -30,6 +30,38 @@ function resolveSourceList(message: ChatMessageType): Citation[] {
     if (ref) recovered.push(ref)
   }
   return recovered
+}
+
+function formatTokens(value: number | null | undefined): string {
+  return value == null ? '—' : value.toLocaleString()
+}
+
+function formatCost(value: number | null | undefined): string {
+  return value == null ? 'Unavailable' : `$${value.toFixed(6)}`
+}
+
+function formatLatency(value: number | null | undefined): string {
+  if (value == null) return '—'
+  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`
+}
+
+function ResponseUsage({ usage }: { usage: GroqUsage }) {
+  const inputTokens = usage.input_tokens ?? usage.prompt_tokens
+  const outputTokens = usage.output_tokens ?? usage.completion_tokens
+  const totalTokens = inputTokens != null && outputTokens != null
+    ? inputTokens + outputTokens
+    : usage.total_tokens
+
+  return (
+    <div className="chat-msg__usage" aria-label="AI response token usage">
+      <span className="chat-msg__usage-model">{usage.model || 'AI model'}</span>
+      <span>Input: {formatTokens(inputTokens)}</span>
+      <span>Output: {formatTokens(outputTokens)}</span>
+      <span>Total: {formatTokens(totalTokens)}</span>
+      <span>Est. cost: {formatCost(usage.total_cost ?? usage.estimated_cost_usd)}</span>
+      <span>Latency: {formatLatency(usage.latency_ms)}</span>
+    </div>
+  )
 }
 
 export function ChatMessage({ message, activeCitationKey, onCitationClick }: Props) {
@@ -64,6 +96,8 @@ export function ChatMessage({ message, activeCitationKey, onCitationClick }: Pro
             />
           )}
         </div>
+
+        {!isUser && message.usage && <ResponseUsage usage={message.usage} />}
 
         {!isUser && insufficient && retrievedCount > 0 && (
           <div className="chat-msg__citations chat-msg__citations--retrieved">

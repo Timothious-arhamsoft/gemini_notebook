@@ -24,6 +24,7 @@
 
 /* ── Header ─────────────────────────────────────────────── */
 .ws-header {
+  position: relative;
   height: 64px;
   min-height: 64px;
   display: flex;
@@ -92,6 +93,86 @@
   display: flex;
   align-items: center;
   gap: 0.75rem;
+}
+
+.ws-header__usage {
+  position: relative;
+  color: var(--fg-muted);
+}
+
+.ws-header__usage summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.ws-header__usage summary::-webkit-details-marker {
+  display: none;
+}
+
+.ws-header__usage summary::before {
+  content: "▤";
+  margin-right: 0.4rem;
+  color: var(--accent);
+}
+
+.ws-header__usage[open] summary,
+.ws-header__usage summary:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.ws-header__usage-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: 260px;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+}
+
+.ws-header__usage-popover h4 {
+  margin: 0 0 0.65rem;
+  color: var(--fg-main);
+  font-size: 0.88rem;
+}
+
+.ws-header__usage-popover dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.45rem 0.75rem;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.ws-header__usage-popover dt {
+  color: var(--fg-muted);
+}
+
+.ws-header__usage-popover dd {
+  margin: 0;
+  color: var(--fg-main);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ws-header__usage-popover p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+}
+
+.ws-header__usage-popover .ws-header__usage-note {
+  margin-top: 0.65rem;
+  color: var(--fg-muted);
 }
 
 .ws-header__logout {
@@ -645,6 +726,21 @@
 .chat-msg__body {
   flex: 1;
   min-width: 0;
+}
+
+.chat-msg__usage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.85rem;
+  margin: 0.45rem 0 0.25rem;
+  color: var(--fg-muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-msg__usage-model {
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .chat-msg__plain {
@@ -1695,4 +1791,3 @@
     padding: 0 0.5rem;
   }
 }
-

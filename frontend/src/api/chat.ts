@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { Citation, GroqUsage } from '../types'
+import type { Citation, GroqUsage, NotebookTokenUsage } from '../types'
 
 export interface ApiChatMessage {
   id: string
@@ -36,6 +36,11 @@ export function mapApiChatMessage(m: ApiChatMessage) {
 
 export async function fetchChatMessagesApi(notebookId: string): Promise<ApiChatMessage[]> {
   const res = await apiClient.get<ApiChatMessage[]>(`/notebooks/${notebookId}/chat/messages`)
+  return res.data
+}
+
+export async function fetchNotebookTokenUsageApi(notebookId: string): Promise<NotebookTokenUsage> {
+  const res = await apiClient.get<NotebookTokenUsage>(`/notebooks/${notebookId}/chat/usage`)
   return res.data
 }
 

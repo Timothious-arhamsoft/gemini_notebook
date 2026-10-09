@@ -165,7 +165,6 @@ def _usage_from_response(response: Any, model: str, latency_ms: float) -> Option
         model=model,
         prompt_tokens=_int_field("prompt_tokens"),
         completion_tokens=_int_field("completion_tokens"),
-        total_tokens=_int_field("total_tokens"),
         cached_tokens=_extract_cached_tokens(usage_obj),
         request_id=request_id,
         latency_ms=latency_ms,

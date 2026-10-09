@@ -97,13 +97,30 @@ export type MessageRole = 'user' | 'assistant' | 'system'
 
 export interface GroqUsage {
   model?: string | null
+  input_tokens?: number | null
+  output_tokens?: number | null
   prompt_tokens?: number | null
   completion_tokens?: number | null
   total_tokens?: number | null
   cached_tokens?: number | null
+  input_cost?: number | null
+  output_cost?: number | null
+  total_cost?: number | null
   estimated_cost_usd?: number | null
   request_id?: string | null
   latency_ms?: number | null
+}
+
+export interface NotebookTokenUsage {
+  input_tokens: number
+  output_tokens: number
+  total_tokens: number
+  input_cost: number | null
+  output_cost: number | null
+  total_cost: number | null
+  estimated_cost_usd: number | null
+  request_count: number
+  unpriced_request_count: number
 }
 
 export interface Citation {

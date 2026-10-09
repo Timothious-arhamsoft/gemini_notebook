@@ -8,7 +8,12 @@ from app.rag.citations import (
     select_answer_citations,
 )
 from app.rag.context import build_context
-from app.rag.pricing import MODEL_PRICING, build_usage_metadata, estimate_cost_usd
+from app.rag.pricing import (
+    MODEL_PRICING,
+    build_usage_metadata,
+    estimate_cost_breakdown_usd,
+    estimate_cost_usd,
+)
 from app.rag.retrieval import RetrievedChunk
 from app.routers.chat import _parse_source_refs, _to_chat_response
 from app.db.models import ChatMessage
@@ -111,6 +116,16 @@ def test_estimate_cost_gpt_oss_120b():
     assert cost == round(expected, 10)
 
 
+def test_estimate_cost_breakdown_uses_separate_model_rates():
+    breakdown = estimate_cost_breakdown_usd("openai/gpt-oss-120b", 1842, 312)
+    assert breakdown is not None
+    assert breakdown["input_cost"] == round(1842 / 1_000_000 * 0.15, 10)
+    assert breakdown["output_cost"] == round(312 / 1_000_000 * 0.60, 10)
+    assert breakdown["total_cost"] == round(
+        breakdown["input_cost"] + breakdown["output_cost"], 10
+    )
+
+
 def test_estimate_cost_unknown_model_is_none():
     assert estimate_cost_usd("unknown/model", 100, 50) is None
 
@@ -120,17 +135,20 @@ def test_build_usage_metadata_includes_cached_tokens():
         model="openai/gpt-oss-120b",
         prompt_tokens=1842,
         completion_tokens=312,
-        total_tokens=2154,
         cached_tokens=1024,
         latency_ms=2800,
         request_id="req_123",
     )
+    assert usage["input_tokens"] == 1842
+    assert usage["output_tokens"] == 312
     assert usage["prompt_tokens"] == 1842
     assert usage["completion_tokens"] == 312
     assert usage["total_tokens"] == 2154
     assert usage["cached_tokens"] == 1024
     assert usage["model"] == "openai/gpt-oss-120b"
     assert usage["estimated_cost_usd"] is not None
+    assert usage["total_cost"] == usage["estimated_cost_usd"]
+    assert usage["total_cost"] == usage["input_cost"] + usage["output_cost"]
     assert usage["request_id"] == "req_123"
     assert usage["latency_ms"] == 2800.0
 
@@ -186,9 +204,14 @@ def test_parse_v2_source_refs_dict():
         ],
         "usage": {
             "model": "openai/gpt-oss-120b",
+            "input_tokens": 100,
+            "output_tokens": 20,
             "prompt_tokens": 100,
             "completion_tokens": 20,
             "total_tokens": 120,
+            "input_cost": 0.000015,
+            "output_cost": 0.000012,
+            "total_cost": 0.000027,
             "estimated_cost_usd": 0.000027,
         },
     }
@@ -197,8 +220,11 @@ def test_parse_v2_source_refs_dict():
     assert citations[0].citation_index == 2
     assert evidence is not None and len(evidence) == 2
     assert usage is not None
+    assert usage.input_tokens == 100
+    assert usage.output_tokens == 20
     assert usage.prompt_tokens == 100
     assert usage.model == "openai/gpt-oss-120b"
+    assert usage.total_cost == usage.input_cost + usage.output_cost
 
 
 def test_historical_message_without_usage_does_not_crash():

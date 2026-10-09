@@ -9,7 +9,7 @@ import pytest
 from groq import RateLimitError
 
 from app.rag.generation import _format_llm_error
-from app.rag.llm import GroqService, filter_history_for_llm
+from app.rag.llm import GroqService, _usage_from_response, filter_history_for_llm
 from app.rag.rate_limit import format_capacity_error, parse_retry_after_minutes
 
 
@@ -70,6 +70,21 @@ def _fake_completion(text: str, model: str):
         ),
         x_groq=None,
     )
+
+
+def test_usage_uses_provider_prompt_and_completion_counts():
+    response = _fake_completion("answer", "openai/gpt-oss-120b")
+    response.usage.total_tokens = 999
+
+    usage = _usage_from_response(response, "openai/gpt-oss-120b", 2400)
+
+    assert usage is not None
+    assert usage["input_tokens"] == response.usage.prompt_tokens
+    assert usage["output_tokens"] == response.usage.completion_tokens
+    assert usage["total_tokens"] == (
+        response.usage.prompt_tokens + response.usage.completion_tokens
+    )
+    assert usage["latency_ms"] == 2400
 
 
 def test_generate_answer_falls_back_silently():

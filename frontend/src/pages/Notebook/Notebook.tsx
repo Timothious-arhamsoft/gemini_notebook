@@ -9,7 +9,12 @@ import {
   fetchSourceStatusApi,
   retrySourceApi,
 } from '../../api/sources'
-import { fetchChatMessagesApi, mapApiChatMessage, sendChatMessageApi } from '../../api/chat'
+import {
+  fetchChatMessagesApi,
+  fetchNotebookTokenUsageApi,
+  mapApiChatMessage,
+  sendChatMessageApi,
+} from '../../api/chat'
 import { citationSelectionKey } from '../../utils/assistantContent'
 import {
   ACTIVE_PROCESSING_STATUSES,
@@ -17,7 +22,7 @@ import {
   mapApiSourceToUpload,
 } from '../../utils/sourceProcessing'
 import { logsForStatusTransition, type PollLogState } from './sourceActivityLog'
-import type { GroqUsage } from '../../types'
+import type { GroqUsage, NotebookTokenUsage } from '../../types'
 import { WorkspaceHeader } from './components/WorkspaceHeader/WorkspaceHeader'
 import { SourcesSidebar } from './components/SourcesSidebar/SourcesSidebar'
 import { StudioSidebar } from './components/StudioSidebar/StudioSidebar'
@@ -54,6 +59,7 @@ export function NotebookPage() {
   const [logs, setLogs] = useState<string[]>([])
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null)
   const [latestAiUsage, setLatestAiUsage] = useState<GroqUsage | null>(null)
+  const [notebookTokenUsage, setNotebookTokenUsage] = useState<NotebookTokenUsage | null>(null)
 
   const userHasRenamedRef = useRef(false)
   const pollLogStateRef = useRef<Map<string, PollLogState>>(new Map())
@@ -149,16 +155,23 @@ export function NotebookPage() {
     let cancelled = false
     setLoading(true)
     setError(null)
+    setLatestAiUsage(null)
+    setNotebookTokenUsage(null)
 
     Promise.all([
       notebooksApi.get(id),
       fetchSourcesApi(id).catch(() => []),
       fetchChatMessagesApi(id).catch(() => []),
+      fetchNotebookTokenUsageApi(id).catch(err => {
+        console.error('Failed to load notebook token usage:', err)
+        return null
+      }),
     ])
-      .then(([data, existingSources, existingChatMessages]) => {
+      .then(([data, existingSources, existingChatMessages, existingTokenUsage]) => {
         if (cancelled) return
 
         setNotebook(data)
+        setNotebookTokenUsage(existingTokenUsage)
         if (data.title && data.title !== UNTITLED) {
           userHasRenamedRef.current = true
         }
@@ -445,6 +458,11 @@ export function NotebookPage() {
       } else {
         addLog('[ASSISTANT ANSWER] Response saved to database.')
       }
+      try {
+        setNotebookTokenUsage(await fetchNotebookTokenUsageApi(id))
+      } catch (usageErr) {
+        console.error('Failed to refresh notebook token usage:', usageErr)
+      }
     } catch (err: unknown) {
       console.error('Failed to send chat message:', err)
       const detail =
@@ -490,6 +508,7 @@ export function NotebookPage() {
       <WorkspaceHeader
         title={notebook.title}
         description={notebook.description ?? sourceCountLabel(uploads.length)}
+        tokenUsage={notebookTokenUsage}
         onTitleChange={handleTitleChange}
         onTitleBlur={handleTitleBlur}
       />
